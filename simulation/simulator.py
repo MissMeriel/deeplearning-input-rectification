@@ -632,3 +632,15 @@ class Simulator():
         # bng.resume()
         # find_width_of_road(bng)
         return vehicle, bng, scenario, model
+
+    # collect overhead view of setup
+    def get_overhead_view(self, scenario, pos=(221.854, -128.443, 165.5)):
+        eagles_eye_cam = Camera(pos, (0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
+                                fov=90, resolution=(1500,1500), colour=True, depth=True, annotation=True)
+        scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
+        freecams = scenario.render_cameras()
+        overhead_view = freecams['eagles_eye_cam']["colour"].convert('RGB')
+        plt.title("freecam")
+        plt.imshow(overhead_view)
+        overhead_view.save("eagles-eye-view.jpg", "JPEG")
+        return overhead_view

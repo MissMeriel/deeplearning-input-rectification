@@ -21,8 +21,7 @@ import PIL
 import sys
 sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/DAVE2-Keras')
 from DAVE2pytorch import DAVE2PytorchModel, DAVE2v3
-# import VAEsteer, VAE, VAEbasic
-# from VAEsteer import *
+from deepbillboard import DeepBillboard
 from vaes import VQVAE
 # sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/superdeepbillboard')
 sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/BeamNGpy')
@@ -36,12 +35,11 @@ from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
 
 # globals
 default_color = 'green' #'Red'
-default_scenario = 'hirochi_raceway' #'industrial' #'automation_test_track'
-road_id = "9202"
-integral = 0.0
-prev_error = 0.0
+default_scenario = 'automation_test_track'
+road_id = "8341"
+integral, prev_error = 0.0, 0.0
 overall_throttle_setpoint = 40
-setpoint = overall_throttle_setpoint #50.0 #53.3 #https://en.wikipedia.org/wiki/Speed_limits_by_country
+setpoint = overall_throttle_setpoint
 lanewidth = 3.75 #2.25
 centerline = []
 centerline_interpolated = []
@@ -49,8 +47,6 @@ roadleft = []
 roadright = []
 steps_per_sec = 30 #100 # 36
 training_file = 'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
-
-
 
 def spawn_point():
     global lanewidth, road_id, default_scenario
@@ -97,11 +93,42 @@ def spawn_point():
             # starting line
             return {'pos': (487.25, 178.73, 131.928), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
         elif road_id == "7991":
-            return {'pos': (57.229, 360.560, 128.203), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
+            return {'pos': (57.229, 360.560, 128.3), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
+        elif road_id == "7846":
+            return {'pos': (-456.0, -100.3, 117.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
+        elif road_id == "8185": # good for saliency testing
+            return {'pos': (174.92, -289.7, 120.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
         elif road_id == "8293":
             return {'pos': (-556.185, 386.985, 145.5), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 120)}
+        elif road_id == "8341":
+            return {'pos': (775.5, -2.2, 132.6), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 90)}
+        # elif road_id == "8287": # actually the side of the road
+        #     return {'pos': (-198.8, -251.0, 119.8), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 0)}
+        # elif road_id == "7998": # actually the side of the road
+        #     return {'pos': (-162.6, 108.8, 122.1), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 60)}
+        elif road_id == "8357":
+            return {'pos': (-450.45, 679.2, 249.45), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 150)}
+        elif road_id == "7770":
+            return {'pos': (-453.42, 61.7, 117.32), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 0)}
+        elif road_id == "7905":
+            return {'pos': (768.2, 452.04, 145.5), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), -110)}
+        elif road_id == "8205":
+            return {'pos': (501.4, 178.6, 131.9), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 0)}
+        elif road_id == "8353":
+            return {'pos': (887.2, 359.8, 159.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), -20)}
+        elif road_id == "7882":
+            return {'pos': (-546.8, 568.0, 199.9), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 155)}
+        elif road_id == "8179":
+            return {'pos': (-738.1, 257.3, 133.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 150)}
+        # elif road_id == "8248": # actually the side of the road
+        #     return {'pos': (-298.8, 13.6, 118.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 180)}
+        # elif road_id == "7768": # actually the side of the road
+        #     return {'pos': (-298.8, 13.6, 118.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 180)}
+        # elif road_id == "7807": # actually the side of the road
+        #     return {'pos': (-251.2, -260.0, 119.2), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), 0)}
+        # elif road_id == "8049":  # actually the side of the road
+        #     return {'pos': (-405.0, -26.6, 117.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.703, 0.711), -110)}
         elif road_id == 'starting line 30m down':
-            # 30m down track from starting line
             return {'pos': (530.25, 178.73, 131.928), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
         elif road_id == 'handlingcircuit':
             # handling circuit
@@ -116,16 +143,12 @@ def spawn_point():
             return {'pos': (-173.009,137.433,116.701), 'rot': None,'rot_quat': (0.0227101, -0.00198367, 0.520494, 0.853561)}
             return {'pos': (-166.679, 146.758, 117.68), 'rot': None,'rot_quat': (0.075107827782631, -0.050610285252333, 0.99587279558182, 0.0058960365131497)}
         elif road_id == 'rally track':
-            # rally track
             return {'pos': (-374.835, 84.8178, 115.084), 'rot': None, 'rot_quat': (0, 0, 0.718422, 0.695607)}
-        elif road_id == 'highway':
-            # highway (open, farm-like)
+        elif road_id == 'highway': #(open, farm-like)
             return {'pos': (-294.791, -255.693, 118.703), 'rot': None, 'rot_quat': (0, 0, -0.704635, 0.70957)}
-        elif road_id == 'highwayopp':
-            # highway (open, farm-like)
+        elif road_id == 'highwayopp': # (open, farm-like)
             return {'pos': (-542.719,-251.721,117.083), 'rot': None, 'rot_quat': (0.0098941307514906,0.0096141006797552,0.72146373987198,0.69231480360031)}
         elif road_id == 'default':
-            # default
             return {'pos': (487.25, 178.73, 131.928), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
     elif default_scenario == 'industrial':
         if road_id == 'west':
@@ -153,6 +176,7 @@ def spawn_point():
         if road_id == "9039": # good candidate for input rect.
             return {'pos': (290.558, -277.280, 46.0), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
         elif road_id == "9205":
+            # return {'pos': (-3, 230.0, 26.2), 'rot': None, 'rot_quat': (0, 0, -0.277698, 0.960669)}
             return {'pos': (-401.98, 243.3, 25.5), 'rot': None, 'rot_quat': (0, 0, -0.277698, 0.960669)}
         # elif road_id == "9156":
         #     return {'pos': (-401.98, 243.3, 25.5), 'rot': None, 'rot_quat': (0, 0, -0.277698, 0.960669)}
@@ -167,6 +191,8 @@ def spawn_point():
             return {'pos': (-383.498, 436.979, 32.1), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.2777, 0.9607), 120)}
         elif road_id == "9202": # lanelines
             return {'pos': (-315.2, 80.94, 32.33), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.2777, 0.9607), -20)}
+        elif road_id == "9062":
+            return {'pos': (-315.2, 80.94, 32.33), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.2777, 0.9607), -20)}
         else:
             return {'pos': (-453.309, 373.546, 25.3623), 'rot': None, 'rot_quat': (0, 0, -0.2777, 0.9607)}
     elif default_scenario == "small_island":
@@ -177,7 +203,7 @@ def spawn_point():
         else:
             return {'pos': (254.77, 233.82, 39.5792), 'rot': None, 'rot_quat': (-0.013234630227089, 0.0080483080819249, -0.00034890600363724, 0.99987995624542)}
     elif default_scenario == "jungle_rock_island":
-        return {'pos': (-9.99082, 580.726, 156.72), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
+        return {'pos': (-10.0, 580.73, 156.8), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
 
 def setup_sensors(vehicle):
     # Set up sensors
@@ -317,9 +343,11 @@ def calc_deviation_from_center(centerline, traj):
 
 def plot_racetrack_roads(roads, bng):
     global default_scenario, road_id
+    print("Plotting scenario roads...")
     sp = spawn_point()
     colors = ['b','g','r','c','m','y','k']
     symbs = ['-','--','-.',':','.',',','v','o','1',]
+    selectedroads = []
     for road in roads:
         road_edges = bng.get_road_edges(road)
         x_temp = []
@@ -331,18 +359,16 @@ def plot_racetrack_roads(roads, bng):
         if (s < 400):
             continue
         for edge in road_edges:
-            # if edge['middle'][0] < 100:
-            #     dont_add = True
-            #     break
-            # if edge['middle'][1] < -300 or edge['middle'][1] > 0:
-            #     dont_add = True
-            #     break
             if not dont_add:
                 x_temp.append(edge['middle'][0])
                 y_temp.append(edge['middle'][1])
         if not dont_add:
             symb = '{}{}'.format(random.choice(colors), random.choice(symbs))
             plt.plot(x_temp, y_temp, symb, label=road)
+            selectedroads.append(road)
+    for r in selectedroads: # ["8179", "8248", "8357", "8185", "7770", "7905", "8205", "8353", "8287", "7800", "8341", "7998"]:
+        a = bng.get_road_edges(r)
+        print(r, a[0]['middle'])
     plt.plot([sp['pos'][0]], [sp['pos'][1]], "bo")
     plt.legend()
     plt.show()
@@ -369,10 +395,6 @@ def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     x = [t[0] for t in traj]
     y = [t[1] for t in traj]
     plt.plot(x,y, 'b--', label=label1)
-    # plt.gca().set_aspect('equal')
-    # plt.axis('square')
-    plt.xlabel('x - axis')
-    plt.ylabel('y - axis')
     plt.title(title)
     plt.legend()
     plt.draw()
@@ -483,7 +505,6 @@ def has_car_left_track(vehicle_pos, vehicle_bbox, bng):
     dist = min(distance_from_centerline)
     return dist > 9.0, dist
 
-
 def add_qr_cubes(scenario):
     global qr_positions
     qr_positions = []
@@ -514,6 +535,8 @@ def setup_beamng(vehicle_model='etk800'):
     vehicle = setup_sensors(vehicle)
     spawn = spawn_point()
     scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
+    add_barriers(scenario)
+
     # eagles_eye_cam = Camera((221.854, -128.443, 165.5),
     #                         (0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
     #                         fov=90, resolution=(1500,1500),
@@ -562,7 +585,7 @@ def run_scenario(vehicle, bng, scenario, model, vehicle_model='etk800', run_numb
     start_time = sensors['timer']['time']
     outside_track = False
     distance_from_center = 0
-    writedir = f"{default_scenario}-{road_id}-lap-test2"
+    writedir = f"{default_scenario}-{road_id}-lap-test"
     if not os.path.isdir(writedir):
         os.mkdir(writedir)
     with open(f"{writedir}/data.txt", "w") as f:
@@ -583,52 +606,31 @@ def run_scenario(vehicle, bng, scenario, model, vehicle_model='etk800', run_numb
             dt = (sensors['timer']['time'] - start_time) - runtime
             processed_img = model.process_image(image).to(device)
             prediction = model(processed_img)
-            print(f"{prediction.item()=:.3f}")
+            steering = float(prediction.item())
 
-            if True: # distance_from_center > 0.0:
+            if False: # distance_from_center > 4.0:
                 if vae_type == "torch":
                     rectified_image = vae(processed_img)
                     rectimg = rectified_image[0].permute(0, 2, 3, 1).detach().cpu().numpy()[0]
                 else:
                     rectimg = np.asarray(image)[None]
-                    # rectimg = tf.image.resize(rectimg[...,[2,1,0]].copy(), [136, 240])
                     rectimg = tf.image.resize(rectimg, [136, 240])
-                    # tmp = rectimg.numpy()
-                    # tmp = tmp.astype(uint8)[0]
-                    # cv2.imshow('rectified_img_upres', tmp[:, :, ::-1])
-                    # cv2.waitKey(1)
-                    # data_dict = tree.map_structure(lambda x: x, [rectimg])
-                    # valid_dataset = (
-                    #     tf.data.Dataset.from_tensor_slices(data_dict)
-                    #         .map(VQVAE.cast_and_normalise_images)
-                    #         .repeat(1)  # 1 epoch
-                    #         .batch(1)
-                    #         .prefetch(-1))
-                    # valid_batch = next(iter(valid_dataset))
-                    # rectimg = tf.transpose(rectimg, perm=[0, 3, 1, 2])
                     rectimg = VQVAE.cast_and_normalise_images(rectimg)
-                    # print(f"{rectimg.shape=}")
                     rectimg = vae(rectimg, is_training=False)['x_recon']
                     rectimg = rectimg + 0.5
                     rectimg = rectimg.numpy()[0]
-                    # rectimg = tf.image.resize(rectimg, [135, 240], method="gaussian").numpy()[0]
-                    print(f"{type(rectimg)}")
-                    print(f"{rectimg.shape=}")
 
                 cv2.imshow('rectified_img_downres', rectimg[:, :, ::-1])
                 cv2.waitKey(1)
-                print(f"orig. prediction={prediction.item()}")
+                print(f"orig. prediction={prediction.item():3f}")
                 processed_img = model.process_image(rectimg).to(device)
-                # print(f"{processed_img.shape=}")
-                # print(f"after processing, {type(processed_img)}")
                 prediction_vae = model(processed_img)
-                print(f"vae prediction={prediction_vae.item()}")
+                print(f"vae prediction={prediction_vae.item():3f}")
+                steering = float(prediction_vae.item())
 
             runtime = sensors['timer']['time'] - start_time
 
             # control params
-            # steering = float(prediction.item())
-            steering = float(prediction_vae.item())
             total_predictions += 1
             position = str(vehicle.state['pos']).replace(",", " ")
             orientation = str(vehicle.state['dir']).replace(",", " ")
@@ -642,7 +644,7 @@ def run_scenario(vehicle, bng, scenario, model, vehicle_model='etk800', run_numb
                 setpoint = 40
             throttle = throttle_PID(kph, dt)
             vehicle.control(throttle=throttle, steering=steering, brake=0.0)
-
+            # 17.2,233.2,26.2 0.0049366145394742,-0.0014738570898771,-0.72177958488464,0.69210386276245
             steering_inputs.append(steering)
             throttle_inputs.append(throttle)
             timestamps.append(runtime)
@@ -698,7 +700,7 @@ def turn_X_degrees(rot_quat, degrees=90):
 
 def add_barriers(scenario):
     barrier_locations = []
-    with open('posefiles/industrial_racetrack_barrier_locations.txt', 'r') as f:
+    with open('posefiles/hirochi_barrier_locations.txt', 'r') as f:
         lines = f.readlines()
         for i, line in enumerate(lines):
             line = line.split(' ')
@@ -706,12 +708,26 @@ def add_barriers(scenario):
             pos = tuple([float(i) for i in pos])
             rot_quat = line[1].split(',')
             rot_quat = tuple([float(j) for j in rot_quat])
-            rot_quat = turn_X_degrees(rot_quat, degrees=90)
+            rot_quat = turn_X_degrees(rot_quat, degrees=-115)
             # barrier_locations.append({'pos':pos, 'rot_quat':rot_quat})
-            # add barrier to scenario
             ramp = StaticObject(name='barrier{}'.format(i), pos=pos, rot=None, rot_quat=rot_quat, scale=(1, 1, 1),
                                 shape='levels/Industrial/art/shapes/misc/concrete_road_barrier_a.dae')
             scenario.add_object(ramp)
+
+def deepbillboard(model, sequence, direction, bb_size=5, iterations=400, noise_level=25, input_divers=False):
+    deepbb = DeepBillboard.DeepBillboard(model, sequence, direction)
+    img_arr = [hashmap['image'] for hashmap in sequence]
+    img_patches = [hashmap['bbox'][0] for hashmap in sequence]
+    new_img_patches = []
+    for i, patch in enumerate(img_patches):
+        temp = [i]
+        for tup in patch:
+            temp.append(tup[0]);
+            temp.append(tup[1])
+        new_img_patches.append(copy.deepcopy(temp))
+    perturbed_billboard_images = deepbb.perturb_images(img_arr, np.array(new_img_patches), model, bb_size=bb_size, iterations=iterations,
+                                                       noise_level=noise_level, input_divers=input_divers)
+    return perturbed_billboard_images
 
 def main():
     global base_filename, default_color, default_scenario, road_id
@@ -720,6 +736,8 @@ def main():
     model_name = "dave2/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     model = torch.load(model_name, map_location=torch.device('cpu')).eval()
     model = model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+
+
 
     if vae_type == "torch":
         vae_name = "/mnt/c/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/vae/VAEsteer-4thattempt-nobatchnorm.pt"
@@ -733,7 +751,7 @@ def main():
     for i in range(1):
         results = run_scenario(vehicle, bng, scenario, model, vehicle_model='hopper', run_number=i, vae=vae, vae_type=vae_type)
         results['distance'] = get_distance_traveled(results['traj'])
-        plot_trajectory(results['traj'], f"{model._get_name()}-40kph-runtime{results['runtime']:.2f}-distance{results['distance']:.2f}")
+        plot_trajectory(results['traj'], f"{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-distance{results['distance']:.2f}")
     bng.close()
 
 

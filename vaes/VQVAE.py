@@ -431,17 +431,8 @@ def instantiate_VQVAE():
         commitment_cost=commitment_cost)
 
     model = VQVAEModel(encoder, decoder, vq_vae, pre_vq_conv1, data_variance=0.036)
-    checkpoint_root = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/vaes/checkpoints136x240"
-    # # A `Checkpoint` object manages checkpointing of the TensorFlow state associated
-    # # with the objects passed to it's constructor. Note that Checkpoint supports
-    # # restore on create, meaning that the variables of `my_module` do **not** need
-    # # to be created before you restore from a checkpoint (their value will be
-    # # restored when they are created).
+    checkpoint_root = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/vaes/checkpoints136x240-origdataset"
     checkpoint = tf.train.Checkpoint(module=model)
-
-    # # Most training scripts will want to restore from a checkpoint if one exists. This
-    # # would be the case if you interrupted your training (e.g. to use your GPU for
-    # # something else, or in a cloud environment if your instance is preempted).
     latest = tf.train.latest_checkpoint(checkpoint_root)
     print(f"{latest=}")
     if latest is not None:
