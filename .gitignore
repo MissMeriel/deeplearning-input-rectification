@@ -1,2 +1,9 @@
 .idea/
 *.jpg
+.venv-rect
+models/weights/checkpoints*
+*pycache*
+CrashNet*
+# trace files
+track-traces/
+CrashNet-traces

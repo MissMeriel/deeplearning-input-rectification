@@ -1,0 +1,28 @@
+Name:	vEthernet (WSL)
+Description:	Hyper-V Virtual Ethernet Adapter
+Physical address (MAC):	00:15:5d:91:07:80
+Status:	Operational
+Maximum transmission unit:	1500
+IPv4 address:	172.29.224.1/20
+IPv6 address:	fe80::59e3:b9ce:c38f:ffbb%29/64
+DNS servers:	fec0:0:0:ffff::1%1, fec0:0:0:ffff::2%1, fec0:0:0:ffff::3%1
+Connectivity (IPv4/IPv6):	Disconnected
+Name:	Ethernet
+Description:	Intel(R) Ethernet Connection (2) I219-LM
+Physical address (MAC):	a4:ae:12:2c:27:2d
+Status:	Operational
+Maximum transmission unit:	1500
+Link speed (Receive/Transmit):	1000/1000 (Mbps)
+DHCP enabled:	Yes
+DHCP servers:	128.143.67.11
+DHCP lease obtained:	‎Thursday, ‎July ‎28, ‎2022 9:46:42 AM
+DHCP lease expires:	‎Thursday, ‎August ‎4, ‎2022 9:46:42 AM
+IPv4 address:	128.143.69.140/24
+IPv6 address:	fe80::b86d:f64a:a935:5556%15/64
+Default gateway:	128.143.69.1
+DNS servers:	128.143.67.11, 128.143.2.7
+DNS domain name:	cs.virginia.edu
+DNS connection suffix:	cs.virginia.edu
+Network name:	cs.virginia.edu
+Network category:	Public
+Connectivity (IPv4/IPv6):	Connected to Internet / Connected to unknown network

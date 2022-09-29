@@ -10,33 +10,29 @@ from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
 import scipy.misc
 import copy
 from DAVE2pytorch import DAVE2PytorchModel, DAVE2v3
-# import VAEsteer, VAE, VAEbasic
-from VAEsteer import *
 import torch
 import torchvision.transforms as transforms
 import statistics, math
 from scipy.spatial.transform import Rotation as R
 from scipy import interpolate
-import csv
-from ast import literal_eval
 import PIL
 import DQN
-from itertools import count
+import time
 
 # globals
-default_color = 'green' #'Red'
-default_scenario = 'hirochi_raceway' #'industrial' #'automation_test_track'
+default_color = 'green'
+default_scenario = 'hirochi_raceway'
 road_id = "9039"
 integral = 0.0
 prev_error = 0.0
 overall_throttle_setpoint = 40
-setpoint = overall_throttle_setpoint #50.0 #53.3 #https://en.wikipedia.org/wiki/Speed_limits_by_country
+setpoint = overall_throttle_setpoint
 lanewidth = 3.75 #2.25
 centerline = []
 centerline_interpolated = []
 roadleft = []
 roadright = []
-steps_per_sec = 30 #100 # 36
+steps_per_sec = 30
 
 def spawn_point():
     global lanewidth, road_id, default_scenario
@@ -161,7 +157,6 @@ def setup_sensors(vehicle):
     resolution = (240, 135) #(400,225) #(320, 180) #(1280,960) #(512, 512)
     front_camera = Camera(camera_pos, camera_dir, fov, resolution,
                           colour=True, depth=True, annotation=True)
-
     gforces = GForces()
     electrics = Electrics()
     damage = Damage()
@@ -180,9 +175,6 @@ def ms_to_kph(wheelspeed):
 
 def throttle_PID(kph, dt):
     global integral, prev_error, setpoint
-    # kp = 0.001; ki = 0.00001; kd = 0.0001
-    # kp = .3; ki = 0.01; kd = 0.1
-    # kp = 0.15; ki = 0.0001; kd = 0.008 # worked well but only got to 39kph
     kp = 0.19; ki = 0.0001; kd = 0.008
     error = setpoint - kph
     if dt > 0:
@@ -195,7 +187,6 @@ def throttle_PID(kph, dt):
     return w
 
 def diff_damage(damage, damage_prev):
-    new_damage = 0
     if damage is None or damage_prev is None:
         return 0
     new_damage = damage['damage'] - damage_prev['damage']
@@ -287,18 +278,10 @@ def plot_racetrack_roads(roads, bng):
         if (s < 400):
             continue
         for edge in road_edges:
-            # if edge['middle'][0] < 100:
-            #     dont_add = True
-            #     break
-            # if edge['middle'][1] < -300 or edge['middle'][1] > 0:
-            #     dont_add = True
-            #     break
-            if not dont_add:
-                x_temp.append(edge['middle'][0])
-                y_temp.append(edge['middle'][1])
-        if not dont_add:
-            symb = '{}{}'.format(random.choice(colors), random.choice(symbs))
-            plt.plot(x_temp, y_temp, symb, label=road)
+            x_temp.append(edge['middle'][0])
+            y_temp.append(edge['middle'][1])
+        symb = '{}{}'.format(random.choice(colors), random.choice(symbs))
+        plt.plot(x_temp, y_temp, symb, label=road)
     plt.plot([sp['pos'][0]], [sp['pos'][1]], "bo")
     plt.legend()
     plt.show()
@@ -395,13 +378,12 @@ def create_ai_line_from_road_with_interpolation(spawn, bng):
                        cling=True, offset=0.1)
     return line, bng
 
-# track is approximately 12.50m wide
-# car is approximately 1.85m wide
+# track ~12.50m wide; car ~1.85m wide
 def has_car_left_track(vehicle_pos, vehicle_bbox, bng):
     global centerline_interpolated
     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle_pos)
     dist = min(distance_from_centerline)
-    return dist > 9.0, dist
+    return dist > 5.5, dist
 
 
 def add_qr_cubes(scenario):
@@ -420,6 +402,7 @@ def add_qr_cubes(scenario):
                                   rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
             scenario.add_object(box)
 
+
 def setup_beamng(vehicle_model='etk800', camera_pos=(-0.5, 0.38, 1.3), camera_direction=(0, 1.0, 0), pitch_euler=0.0):
     global base_filename, default_color, default_scenario, road_id, steps_per_sec, road_id
 
@@ -435,164 +418,124 @@ def setup_beamng(vehicle_model='etk800', camera_pos=(-0.5, 0.38, 1.3), camera_di
     vehicle = setup_sensors(vehicle)
     spawn = spawn_point()
 
-    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
-    # add_barriers(scenario)
-    # add_qr_cubes(scenario)
-    # setup free camera
-    # eagles_eye_cam = Camera((221.854, -128.443, 165.5),
-    #                         (0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
-    #                         fov=90, resolution=(1500,1500),
-    #                       colour=True, depth=True, annotation=True)
-    # scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
+    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat'])
     scenario.make(beamng)
     bng = beamng.open(launch=True)
-    bng.set_deterministic()  # Set simulator to be deterministic
-    bng.set_steps_per_second(steps_per_sec)  # temporal resolution
+    bng.set_deterministic()
+    bng.set_steps_per_second(steps_per_sec)
     bng.load_scenario(scenario)
     print("Starting scenario....")
     bng.start_scenario()
     print("Interpolating centerline...")
     ai_line, bng = create_ai_line_from_road_with_interpolation(spawn, bng)
-    # Put simulator in pause awaiting further inputs
     print("Pausing BeamNG...")
     bng.pause()
     assert vehicle.skt
-    # bng.resume()
     return vehicle, bng, scenario
 
-def run_scenario(vehicle, bng, scenario, model, vehicle_model='etk800', pitch_euler=0.0,
+def run_scenario(vehicle, bng, scenario, vehicle_model='etk800', pitch_euler=0.0, ep=0,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     global base_filename, default_color, default_scenario, road_id, steps_per_sec
     global integral, prev_error, setpoint
-    integral = 0.0
-    prev_error = 0.0
+    integral, prev_error = 0.0, 0.0
     bng.restart_scenario()
-    plt.pause(0.01)
+    # plt.pause(0.01)
     vehicle.update_vehicle()
     sensors = bng.poll_sensors(vehicle)
     image = sensors['front_cam']['colour'].convert('RGB')
-    pitch = vehicle.state['pitch'][0]
-    roll = vehicle.state['roll'][0]
-    z = vehicle.state['pos'][2]
-    spawn = spawn_point()
-    endpoint = [-346.49896240234375, 431.0029296875, 30.750564575195312] #centerline[-1]
+    endpoint = [-346.5, 431.0, 30.8] #centerline[-1]
     transform = transforms.Compose([transforms.ToTensor()])
 
-    wheelspeed = 0.0; throttle = 0.0; prev_error = setpoint; damage_prev = None; runtime = 0.0
-    kphs = []; traj = []; steering_inputs = []; throttle_inputs = []; timestamps = []
-    damage = None; overall_damage = 0.0
-    final_img = None
-    total_loops = 0; total_imgs = 0; total_predictions = 0
+    prev_error = setpoint
+    kphs, traj, steering_inputs, throttle_inputs, timestamps, distances_from_center = [], [], [], [], [], []
+    overall_damage, runtime, wheelspeed, distance_from_center = 0.0, 0.0, 0.0, 0.0
+    total_loops, total_imgs, total_predictions = 0, 0, 0
     start_time = sensors['timer']['time']
     outside_track = False
-    distance_from_center = 0
-
-    last_screen = torch.zeros(1, 3, DQN.screen_height, DQN.screen_width)
+    done = False
+    # last_screen = torch.zeros(1, 3, DQN.screen_height, DQN.screen_width)
     current_screen = torch.zeros(1, 3, DQN.screen_height, DQN.screen_width)
     state = torch.zeros(1, 3, DQN.screen_height, DQN.screen_width)
 
-    writedir = f"{default_scenario}-{road_id}-lap"
-    if not os.path.isdir(writedir):
-        os.mkdir(writedir)
-    with open(f"{writedir}/data.txt", "w") as f:
-        # f.write(f"IMG,PREDICTION,POSITION,ORIENTATION,KPH,STEERING_ANGLE_CURRENT\n")
+    action_inputs = [-1, 0, 1]
+    while overall_damage <= 0 or not outside_track or not done:
+        vehicle.update_vehicle()
+        sensors = bng.poll_sensors(vehicle)
+        image = sensors['front_cam']['colour'].convert('RGB')
+        cv2.imshow('car view', np.array(image)[:, :, ::-1])
+        cv2.waitKey(1)
+        total_imgs += 1
+        kph = ms_to_kph(sensors['electrics']['wheelspeed'])
+        dt = (sensors['timer']['time'] - start_time) - runtime
+        runtime = sensors['timer']['time'] - start_time
 
-        while overall_damage <= 0:
-            # collect images
-            vehicle.update_vehicle()
-            sensors = bng.poll_sensors(vehicle)
-            image = sensors['front_cam']['colour'].convert('RGB')
-            # image = sensors['front_cam']['annotation'].convert('RGB')
-            cv2.imshow('car view', np.array(image)[:, :, ::-1])
-            cv2.waitKey(1)
-            total_imgs += 1
-            kph = ms_to_kph(sensors['electrics']['wheelspeed'])
-            dt = (sensors['timer']['time'] - start_time) - runtime
-            # processed_img = model.process_image(image).to(device)
-            runtime = sensors['timer']['time'] - start_time
+        # Select and perform an action
+        action = DQN.select_action(state, total_loops)
+        total_predictions += 1
+        # print(f"{distance_from_center=:.1f}\taction_input={action_inputs[action.item()]}")
 
-            # Select and perform an action
-            print(f"{state.shape=}")
-            action = DQN.select_action(state, total_loops)
-            print(f"action={action.item()}")
+        action_input = action_inputs[action.item()]
+        if abs(action_input) > 0.2:
+            setpoint = 30
+        else:
+            setpoint = 40
+        throttle = throttle_PID(kph, dt)
+        vehicle.control(throttle=throttle, steering=action_input, brake=0.0)
 
-            # image.save(f"{writedir}/sample-{total_imgs:05d}.jpg", "JPEG")
-            # f.write(f"sample-{total_imgs:05d}.jpg,{prediction.item()},{str(vehicle.state['pos']).replace(",", " ")},{str(vehicle.state['dir']).replace(",", " ")},{kph},{sensors['electrics']['steering']}\n")
-            if abs(action) > 0.2:
-                setpoint = 30
-            else:
-                setpoint = 40
-            throttle = throttle_PID(kph, dt)
-            vehicle.control(throttle=throttle, steering=action.item(), brake=0.0)
+        steering_inputs.append(action)
+        throttle_inputs.append(throttle)
+        timestamps.append(runtime)
+        kphs.append(ms_to_kph(wheelspeed))
+        traj.append(vehicle.state['pos'])
+        vehicle.update_vehicle()
+        total_loops += 1
+        overall_damage = sensors['damage']["damage"]
+        outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], vehicle.get_bbox(), bng)
+        distances_from_center.append(distance_from_center)
 
-            steering_inputs.append(action)
-            throttle_inputs.append(throttle)
-            timestamps.append(runtime)
+        if overall_damage > 0.0:
+            print(f"Damage={overall_damage:2f}, exiting...")
+            done = True
 
-            damage = sensors['damage']
-            overall_damage = damage["damage"]
-            new_damage = diff_damage(damage, damage_prev)
-            damage_prev = damage
-            vehicle.update_vehicle()
-            traj.append(vehicle.state['pos'])
+        if outside_track:
+            print("Left track, exiting...")
+            done = True
 
-            kphs.append(ms_to_kph(wheelspeed))
-            total_loops += 1
+        if distance(vehicle.state['pos'], endpoint) < 20:
+            print("Reached endpoint, exiting...")
+            done = True
 
-            if new_damage > 0.0:
-                print("New damage={}, exiting...".format(new_damage))
-                done = True
-                # break
+        reward = 5.5 - distance_from_center #sum([6.0 - d for d in distances_from_center])
+        reward = torch.tensor([reward], dtype=torch.float, device=device)
+        # Observe new state
+        # last_screen = image
+        sensors = bng.poll_sensors(vehicle)
+        current_screen = sensors['front_cam']['colour'].convert('RGB')
+        if not done:
+            current_screen = transform(current_screen)
+            # last_screen = transform(last_screen)
+            # next_state = current_screen - last_screen
+            # next_state = next_state[None]
+            next_state = current_screen[None]
+        else:
+            next_state = None
 
-            bng.step(1, wait=True)
+        # Store the transition in memory & move to next state
+        DQN.memory.push(state, action, next_state, reward)
+        state = next_state
 
-            # _, reward, done, _ = env.step(action.item())
-            if distance_from_center < 1.5:
-                reward = 1.0
-            else:
-                reward = 0.0
+        # Perform one step of the optimization (on the policy network)
+        DQN.optimize_model()
+        if done:
+            DQN.episode_durations.append(total_loops + 1)
+            DQN.plot_durations(save=(ep % 50 == 0))
+            break
 
-            if distance(vehicle.state['pos'], endpoint) < 20:
-                done = True
-            else:
-                done = False
-            reward = torch.tensor([reward], device=device)
-            # Observe new state
-            last_screen = image
-            sensors = bng.poll_sensors(vehicle)
-            current_screen = sensors['front_cam']['colour'].convert('RGB')
-            if not done:
-                current_screen = transform(current_screen)
-                last_screen = transform(last_screen)
-                next_state = current_screen - last_screen
-                next_state = next_state[None]
-            else:
-                next_state = None
-
-            # Store the transition in memory & move to next state
-            DQN.memory.push(state, action, next_state, reward)
-            state = next_state
-
-            outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], vehicle.get_bbox(), bng)
-            print(f"{distance_from_center=:.1f}")
-            if outside_track:
-                print("Left track, exiting...")
-                done = True
-                # break
-
-            # Perform one step of the optimization (on the policy network)
-            DQN.optimize_model()
-            if done:
-                DQN.episode_durations.append(total_loops + 1)
-                DQN.plot_durations()
-                break
+        bng.step(1, wait=True)
 
     cv2.destroyAllWindows()
-
-    print("Total predictions: {} \nexpected predictions ={}*{}={}".format(total_predictions, round(runtime,3), steps_per_sec, round(runtime*steps_per_sec,3)))
     deviation = calc_deviation_from_center(centerline, traj)
-    results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj, 'deviation':deviation
-               }
+    results = {'runtime': round(runtime,3), 'damage': overall_damage, 'kphs':kphs, 'traj':traj, 'deviation':deviation}
     return results
 
 def get_distance_traveled(traj):
@@ -627,31 +570,22 @@ def add_barriers(scenario):
 
 def main():
     global base_filename, default_color, default_scenario, road_id
-    model_name = "dave2/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    model = torch.load(model_name, map_location=torch.device('cpu')).eval()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
     vehicle, bng, scenario = setup_beamng(vehicle_model='hopper')
-
-    # for i in range(1):
-    #     results = run_scenario(vehicle, bng, scenario, model, vehicle_model='hopper')
-    #     results['distance'] = get_distance_traveled(results['traj'])
-    #     plot_trajectory(results['traj'], f"{model._get_name()}-40kph-runtime{results['runtime']:.2f}-distance{results['distance']:.2f}")
-    # bng.close()
-
-    steps_done = 0
-    num_episodes = 50
+    num_episodes = 1000
+    starttime = time.time()
     for i_episode in range(num_episodes):
-
-        results = run_scenario(vehicle, bng, scenario, model, vehicle_model='hopper')
+        print(f"RUNNING Episode {i_episode}")
+        results = run_scenario(vehicle, bng, scenario, vehicle_model='hopper', ep=i_episode)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % DQN.TARGET_UPDATE == 0:
             DQN.target_net.load_state_dict(DQN.policy_net.state_dict())
-
-    print('Complete')
+            DQN.save_policies(i_episode)
+    print(f"Complete; {(time.time() - starttime)/60.0:2f} minutes elapsed")
 
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True
+    logging.getLogger('PIL').setLevel(logging.WARNING)
     main()
