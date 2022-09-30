@@ -6,4 +6,4 @@ models/weights/checkpoints*
 CrashNet*
 # trace files
 track-traces/
-CrashNet-traces
+simulation/RLtrain-*

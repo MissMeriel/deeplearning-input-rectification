@@ -24,9 +24,11 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         identity = x.clone()
-        x = self.relu(self.batch_norm1(self.conv1(x)))
+        # x = self.relu(self.batch_norm1(self.conv1(x)))
+        x = nn.ELU()(self.batch_norm1(self.conv1(x)))
 
-        x = self.relu(self.batch_norm2(self.conv2(x)))
+        # x = self.relu(self.batch_norm2(self.conv2(x)))
+        x = nn.ELU()(self.batch_norm2(self.conv2(x)))
 
         x = self.conv3(x)
         x = self.batch_norm3(x)
@@ -36,7 +38,8 @@ class Bottleneck(nn.Module):
             identity = self.i_downsample(identity)
         # add identity
         x += identity
-        x = self.relu(x)
+        # x = self.relu(x)
+        x = nn.ELU()(x)
 
         return x
 
@@ -59,7 +62,8 @@ class Block(nn.Module):
     def forward(self, x):
         identity = x.clone()
 
-        x = self.relu(self.batch_norm2(self.conv1(x)))
+        # x = self.relu(self.batch_norm2(self.conv1(x)))
+        x = nn.ELU()(self.batch_norm2(self.conv1(x)))
         x = self.batch_norm2(self.conv2(x))
 
         if self.i_downsample is not None:
@@ -67,7 +71,8 @@ class Block(nn.Module):
         # print(x.shape)
         # print(identity.shape)
         x += identity
-        x = self.relu(x)
+        # x = self.relu(x)
+        x = nn.ELU()(x)
         return x
 
 
@@ -91,7 +96,7 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         # x = self.relu(self.batch_norm1(self.conv1(x)))
-        x = nn.Tanh()(self.batch_norm1(self.conv1(x)))
+        x = nn.ELU()(self.batch_norm1(self.conv1(x)))
         x = self.max_pool(x)
 
         x = self.layer1(x)

@@ -5,6 +5,7 @@ import random
 import numpy as np
 import matplotlib
 from matplotlib import pyplot as plt
+import shutil
 import logging
 from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
 from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
@@ -302,7 +303,10 @@ def plot_deviation(trajectories, model, deflation_pattern):
             y.append(point[1])
         plt.plot(x, y) #, label="Run {}".format(i))
         i += 1
-    plt.title(f'Trajectories with {model} {deflation_pattern}')
+    if deflation_pattern:
+        plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}')
+    else:
+        plt.title(f'Trajectories with {model} {deflation_pattern}')
     plt.legend(fontsize=8)
     plt.xlim([200,400])
     plt.ylim([-300,-100])
@@ -679,11 +683,11 @@ def train_actor_critic(model, states, actions, critic_values, dr, device=torch.d
         optimizer.zero_grad()
         inputs, labels = data
         inputs = torch.tensor(inputs, dtype=torch.float32, requires_grad=True, device=device)
-        inputs = torch.clamp(inputs + torch.randn(*inputs.shape).to(device)/15, 0, 1)
+        inputs = torch.clamp(inputs + (torch.randn(*inputs.shape).to(device)*256)/15, 0, 255)
         disc_rew = torch.tensor(labels, dtype=torch.float32, requires_grad=False, device=device)
         # critic = torch.tensor(labels[1], dtype=torch.float32, requires_grad=False, device=device)
         outputs = model(inputs)
-        act, est_rew = outputs[0,0], outputs[0,1]
+        act, est_rew = outputs[:,0], outputs[:,1]
         print(f"{est_rew=}\n{disc_rew=}\n")
         loss = loss_fn(est_rew, disc_rew)
         loss.backward()
@@ -702,9 +706,11 @@ def main():
     newdir = f"RLtrain-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
-    PATH = f"{newdir}/ResNet50cont-v6-actorcritic-continuousaction"
+        shutil.copy(f"{__file__}", newdir)
+        shutil.copy(f"{os.getcwd()}/resnetcont.py", newdir)
+    PATH = f"{newdir}/ResNet50-v6-actorcritic-continuousaction"
     vehicle, bng, scenario = setup_beamng(vehicle_model='hopper')
-    num_episodes = 1000
+    num_episodes = 100000
     start_time = time.time()
     alpha = 1e-4
     history, durations = [], []
@@ -719,8 +725,9 @@ def main():
     max_reward = 0.0
     running_rewards = []
     try:
-        model.load_state_dict(torch.load(PATH))
-        print(f"Loaded weights from ./{PATH}.pt")
+        old_trained_weights = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/RLtrain-9_29-13_53-Y7479F/ResNet50-v6-actorcritic-continuousaction.pt"
+        model.load_state_dict(torch.load(old_trained_weights))
+        print(f"Loaded weights from ./{old_trained_weights}")
     except:
         print("No existing weights available")
     for episode in range(num_episodes):
@@ -735,9 +742,9 @@ def main():
         history.append(np.sum(rewards))
         durations.append(duration)
         running_rewards.append(running_reward)
-        if episode % 10 == 0:
+        if episode % 50 == 0:
             plot_durations(history, running_rewards, save=True, title=PATH)
-            plot_deviation(trajectories, "DQN", f"{PATH} {episode=}")
+            plot_deviation(trajectories, "ResNet50", f"{PATH} {episode=}")
         if np.sum(rewards) > max_reward:
             torch.save(model.state_dict(), f"{PATH}.pt")
             max_reward = np.sum(rewards)
