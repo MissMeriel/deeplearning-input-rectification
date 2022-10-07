@@ -60,7 +60,7 @@ class CarEnv(gym.Env):
         super(CarEnv, self).__init__()
         self.beamngpath = beamngpath
         self.default_scenario = 'hirochi_raceway'
-        self.road_id = "9040"
+        self.road_id = "9039"
         self.integral = 0.0
         self.prev_error = 0.0
         self.overall_throttle_setpoint = 40
@@ -80,8 +80,8 @@ class CarEnv(gym.Env):
         setup_logging()
         self.model = model
         self.deflation_pattern = filepathroot
-        # beamng = BeamNGpy('localhost', 64556, home='H:/BeamNG.research.v1.7.0.1', user='H:/BeamNG.research')
-        beamng = BeamNGpy('localhost', 64756, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/BeamNG.research')
+        beamng = BeamNGpy('localhost', 64556, home=f"{self.beamngpath}/BeamNG.research.v1.7.0.1", user=f"{self.beamngpath}/BeamNG.researchINSTANCE2")
+        # beamng = BeamNGpy('localhost', 64756, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/BeamNG.research')
 
         self.scenario = Scenario(self.default_scenario, 'research_test')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")
@@ -140,9 +140,9 @@ class CarEnv(gym.Env):
             steer = -1.0
 
         if abs(steer) > 0.2:
-            setpoint = 30
+            self.setpoint = 30
         else:
-            setpoint = 40
+            self.setpoint = 40
 
         self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
         self.bng.step(1, wait=True)
@@ -167,20 +167,20 @@ class CarEnv(gym.Env):
         return np.array(gray, dtype=np.uint8)
 
     def step(self, action):
-        print(f"STEP() ACTION {action}")
         self._do_action(action)
         obs = self._get_obs()
         outside_track, distance_from_center = self.has_car_left_track()
-        reward = math.pow(2, 4.0 - distance_from_center)
+        if outside_track:
+            reward = -5000
+        else:
+            reward = math.pow(2, 4.0 - distance_from_center)
         done = outside_track or self.state["collision"]
         self.current_rewards.append(reward)
-        print(f"STEP() {reward=}\t{done=}\t{outside_track=}\t{self.state['collision']=}")
+        print(f"STEP() {action=}\t{reward=:.2f}\t{done=}\t{outside_track=}\t{self.state['collision']=}")
         return obs, reward, done, self.state
 
     def reset(self):
         print(f"RESET()")
-        # self._setup_car()
-        # self._do_action(1)
         self.trajectories.append(self.current_trajectory)
         self.all_rewards.append(sum(self.current_rewards))
         dist = self.get_distance_traveled(self.current_trajectory)
@@ -335,7 +335,7 @@ class CarEnv(gym.Env):
             elif self.road_id == "racetrackcurves":
                 return {'pos':(215.912,-243.067,45.8604), 'rot': None, 'rot_quat':(0.029027424752712,0.022241719067097,0.98601061105728,0.16262225806713)}
         elif self.default_scenario == "hirochi_raceway":
-            if self.road_id == "9040": #"9039": # good candidate for input rect.
+            if self.road_id == "9039" or self.road_id == "9040": # good candidate for input rect.
                 #return {'pos': (292.405,-271.64,46.75), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
                 return {'pos': (290.558, -277.280, 46.0), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
             elif self.road_id == "9205":
@@ -424,7 +424,7 @@ class CarEnv(gym.Env):
         return math.sqrt(sqr)
 
     def road_analysis(self):
-        # self.plot_racetrack_roads()
+        self.plot_racetrack_roads()
         print(f"Getting road {self.road_id}...")
         edges = self.bng.get_road_edges(self.road_id)
         self.actual_middle = [edge['middle'] for edge in edges]
