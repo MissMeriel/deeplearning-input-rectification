@@ -183,7 +183,8 @@ class CarEnv(gym.Env):
         self.trajectories.append(self.current_trajectory)
         self.all_rewards.append(sum(self.current_rewards))
         dist = self.get_distance_traveled(self.current_trajectory)
-        self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern)
+        self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode} start", self.deflation_pattern, start_viz=True)
+        self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern, start_viz=False)
         self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
         self.episode += 1
         self.current_trajectory = []
@@ -522,7 +523,7 @@ class CarEnv(gym.Env):
         stddev = statistics.stdev(dists)
         return stddev
 
-    def plot_deviation(self, model, deflation_pattern):
+    def plot_deviation(self, model, deflation_pattern, start_viz=False):
         # global centerline, roadleft, roadright
         plt.figure(20, dpi=180)
         plt.clf()
@@ -550,8 +551,12 @@ class CarEnv(gym.Env):
             i += 1
         plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}')
         plt.legend(fontsize=8)
-        plt.xlim([200,400])
-        plt.ylim([-300,-100])
+        if start_viz:
+            plt.xlim([200,400])
+            plt.ylim([-300,-100])
+        else:
+            plt.xlim([-350, 650])
+            plt.ylim([-325, 475])
         plt.draw()
         plt.savefig(f"{deflation_pattern}-ep{self.episode}-{model}-trajs-so-far.jpg")
         plt.clf()
