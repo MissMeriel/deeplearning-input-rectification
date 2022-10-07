@@ -507,7 +507,7 @@ def setup_beamng(vehicle_model='etk800', image_size=(3, 135, 240), camera_pos=(-
     random.seed(1703)
     setup_logging()
 
-    beamng = BeamNGpy('localhost', 64356, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE2')
+    beamng = BeamNGpy('localhost', 64556, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3')
 
     scenario = Scenario(default_scenario, 'research_test')
     vehicle = Vehicle('ego_vehicle', model=vehicle_model,
@@ -532,7 +532,7 @@ def setup_beamng(vehicle_model='etk800', image_size=(3, 135, 240), camera_pos=(-
     return vehicle, bng, scenario
 
 def calc_reward(distance_from_center):
-    rew = math.pow(3, (4.0 - distance_from_center)) - 10
+    rew = math.pow(2, (4.0 - distance_from_center) ** 2) - 10
     return rew
 
 def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
@@ -551,10 +551,7 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
     total_loops, total_imgs, total_predictions = 0, 0, 0
     start_time = sensors['timer']['time']
     state = sensors['front_cam']['colour'].convert('RGB')
-    if image_size[0] == 1:
-        state = np.array(PIL.ImageOps.grayscale(state))
-    else:
-        state = np.array(state)
+    state = np.array(PIL.ImageOps.grayscale(state))
     outside_track = False
     done = False
     action_inputs = [-1, 0, 1]
@@ -575,7 +572,7 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
             vehicle.control(throttle=1.0, steering=0.0, brake=0.0)
         else:
             # Select and perform an action
-            output = model(torch.tensor(state.reshape((1, *image_size)), dtype=torch.float32, device=device))
+            output = model(torch.tensor(state.reshape((1, 1, image_size[1], image_size[2])), dtype=torch.float32, device=device))
             print(f"{output=}")
             output = output.cpu().detach().numpy()
             action = output[0,0]
@@ -620,10 +617,7 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
             rewards.append(reward)
             critic_values.append(est_rew)
         state = sensors['front_cam']['colour'].convert('RGB')
-        if image_size[0] == 1:
-            state = np.array(PIL.ImageOps.grayscale(state))
-        else:
-            state = np.array(state)
+        state = np.array(PIL.ImageOps.grayscale(state))
     print(f"{total_loops=}")
     cv2.destroyAllWindows()
     # return states, actions, probs, rewards, critic, total_loops
@@ -717,23 +711,26 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-v7-{timestr}-{randstr}"
+    newdir = f"RLtrain-v71-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/resnetcont.py", newdir)
-    PATH = f"{newdir}/ResNet50-v7-AC-continuousaction"
-    image_size = (3, 84, 150)
+    PATH = f"{newdir}/ResNet50-v71-AC-continuousaction"
+    image_size = (1, 84, 150)
     vehicle, bng, scenario = setup_beamng(vehicle_model='hopper', image_size=image_size)
     num_episodes = 100000
     start_time = time.time()
     alpha = 1e-4
     history, durations = [], []
     trajectories = []
+    screen_height, screen_width = 135, 240
     n_actions = 2
     running_reward = 0.0
     from resnetcont import ResNet50
-    model = ResNet50(n_actions, channels=3).to(device)
+    model = ResNet50(n_actions, channels=1).to(device)
+    # model = DQN(screen_height, screen_width, n_actions).to(device)
+
     max_reward = 0.0
     running_rewards = []
     try:
