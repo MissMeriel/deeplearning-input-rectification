@@ -56,8 +56,9 @@ class CarEnv(gym.Env):
 
     metadata = {"render.modes": ["rgb_array"]}
 
-    def __init__(self, image_shape=(3, 135, 240), model="DQN", filepathroot="."):
+    def __init__(self, image_shape=(3, 135, 240), model="DQN", filepathroot=".", beamngpath="C:/Users/Meriel/Documents"):
         super(CarEnv, self).__init__()
+        self.beamngpath = beamngpath
         self.default_scenario = 'hirochi_raceway'
         self.road_id = "9040"
         self.integral = 0.0
@@ -80,7 +81,7 @@ class CarEnv(gym.Env):
         self.model = model
         self.deflation_pattern = filepathroot
         # beamng = BeamNGpy('localhost', 64556, home='H:/BeamNG.research.v1.7.0.1', user='H:/BeamNG.research')
-        beamng = BeamNGpy('localhost', 64756, home='H:/BeamNG.research.v1.7.0.1', user='H:/BeamNG.researchINSTANCE3')
+        beamng = BeamNGpy('localhost', 64756, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/BeamNG.research')
 
         self.scenario = Scenario(self.default_scenario, 'research_test')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")

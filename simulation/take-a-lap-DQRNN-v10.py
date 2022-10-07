@@ -51,7 +51,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-{timestr}-{randstr}"
+    newdir = f"RLtrain-v10-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -59,17 +59,12 @@ def main():
     PATH = f"{newdir}/SB3-v10-actorcritic-continuousaction"
     import gym
     from beamng_env import CarEnv
-    env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH)
+    env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents')
     from stable_baselines3.common.env_checker import check_env
     check_env(env)
     num_episodes = 100000
     start_time = time.time()
-    alpha = 1e-4
-    history, durations = [], []
-    trajectories = []
-    screen_height, screen_width = 135, 240
-    n_actions = 5
-    running_reward = 0.0
+
 
     # Initialize RL algorithm type and parameters
     model = DQN(

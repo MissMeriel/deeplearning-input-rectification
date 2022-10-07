@@ -507,7 +507,7 @@ def setup_beamng(vehicle_model='etk800', image_size=(3, 135, 240), camera_pos=(-
     random.seed(1703)
     setup_logging()
 
-    beamng = BeamNGpy('localhost', 64356, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE2')
+    beamng = BeamNGpy('localhost', 64756, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user='C:/Users/Meriel/Documents/BeamNG.research')
 
     scenario = Scenario(default_scenario, 'research_test')
     vehicle = Vehicle('ego_vehicle', model=vehicle_model,
@@ -531,8 +531,11 @@ def setup_beamng(vehicle_model='etk800', image_size=(3, 135, 240), camera_pos=(-
     assert vehicle.skt
     return vehicle, bng, scenario
 
-def calc_reward(distance_from_center):
-    rew = math.pow(3, (4.0 - distance_from_center)) - 10
+def calc_reward(distance_from_center, collision=False):
+    if collision:
+        rew = -5000
+    else:
+        rew = math.pow(2, (4.0 - distance_from_center) ** 2) - 10
     return rew
 
 def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
@@ -551,10 +554,7 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
     total_loops, total_imgs, total_predictions = 0, 0, 0
     start_time = sensors['timer']['time']
     state = sensors['front_cam']['colour'].convert('RGB')
-    if image_size[0] == 1:
-        state = np.array(PIL.ImageOps.grayscale(state))
-    else:
-        state = np.array(state)
+    state = np.array(PIL.ImageOps.grayscale(state))
     outside_track = False
     done = False
     action_inputs = [-1, 0, 1]
@@ -575,7 +575,7 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
             vehicle.control(throttle=1.0, steering=0.0, brake=0.0)
         else:
             # Select and perform an action
-            output = model(torch.tensor(state.reshape((1, *image_size)), dtype=torch.float32, device=device))
+            output = model(torch.tensor(state.reshape((1, 1, image_size[1], image_size[2])), dtype=torch.float32, device=device))
             print(f"{output=}")
             output = output.cpu().detach().numpy()
             action = output[0,0]
@@ -614,16 +614,13 @@ def run_scenario(vehicle, bng, scenario, model=None, image_size=(3,135,240),
         if kph > 30:
             next_state = np.array(sensors['front_cam']['colour'].convert('RGB'))
             outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], vehicle.get_bbox(), bng)
-            reward = calc_reward(distance_from_center)
+            reward = calc_reward(distance_from_center, outside_track)
             states.append(state.reshape(*image_size))
             actions.append(action)
             rewards.append(reward)
             critic_values.append(est_rew)
         state = sensors['front_cam']['colour'].convert('RGB')
-        if image_size[0] == 1:
-            state = np.array(PIL.ImageOps.grayscale(state))
-        else:
-            state = np.array(state)
+        state = np.array(PIL.ImageOps.grayscale(state))
     print(f"{total_loops=}")
     cv2.destroyAllWindows()
     # return states, actions, probs, rewards, critic, total_loops
@@ -643,9 +640,9 @@ def turn_X_degrees(rot_quat, degrees=90):
     return tuple(r.as_quat())
 
 
-eps = 0.0001
 
-def discounted_rewards(rewards,gamma=0.99,normalize=True):
+
+def discounted_rewards(rewards,gamma=0.9, normalize=False):
     ret = []
     s = 0
     for i, r in enumerate(rewards[::-1]):
@@ -653,6 +650,7 @@ def discounted_rewards(rewards,gamma=0.99,normalize=True):
         s = r + gamma * s
         ret.insert(0, s)
     if normalize:
+        eps = 0.0001
         ret = (ret-np.mean(ret))/(np.std(ret)+eps)
     return ret
 
@@ -717,23 +715,22 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-v7-{timestr}-{randstr}"
+    newdir = f"RLtrain-v72-collrew-nodisc-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/resnetcont.py", newdir)
-    PATH = f"{newdir}/ResNet50-v7-AC-continuousaction"
-    image_size = (3, 84, 150)
+    PATH = f"{newdir}/ResNet50-AC-continuousaction"
+    image_size = (1, 84, 150)
     vehicle, bng, scenario = setup_beamng(vehicle_model='hopper', image_size=image_size)
     num_episodes = 100000
     start_time = time.time()
-    alpha = 1e-4
     history, durations = [], []
     trajectories = []
     n_actions = 2
     running_reward = 0.0
     from resnetcont import ResNet50
-    model = ResNet50(n_actions, channels=3).to(device)
+    model = ResNet50(n_actions, channels=1).to(device)
     max_reward = 0.0
     running_rewards = []
     try:
@@ -742,6 +739,7 @@ def main():
         print(f"Loaded weights from ./{PATH}")
     except:
         print("No existing weights available")
+    all_discounted_rewards = []
     for episode in range(num_episodes):
         states, actions, rewards, critic_values, duration, traj = run_scenario(vehicle, bng, scenario, model=model, image_size=image_size)
         episode_dist_travelled = get_distance_traveled(traj)
@@ -751,12 +749,13 @@ def main():
         dr = discounted_rewards(rewards)
         print(f"Episode {episode} -> Distance:{episode_dist_travelled:.1f}\tEpisode Reward:{episode_reward:.2f}\tRunning reward:{running_reward:.2f}\tTraining time:{(time.time() - start_time)/60.0:.1f}min.")
         print(f"discounted rewards={dr}")
-        train_actor_critic(model, np.array(states), actions, critic_values, np.array(dr), device=device)
-        history.append(np.sum(dr))
+        train_actor_critic(model, np.array(states), actions, critic_values, np.array(rewards), device=device)
+        history.append(np.sum(rewards))
         durations.append(duration)
         running_rewards.append(running_reward)
+        all_discounted_rewards.append(np.sum(dr))
         if episode % 50 == 49:
-            plot_durations(history, running_rewards, save=True, title=PATH)
+            plot_durations(history, all_discounted_rewards, save=True, title=PATH)
             plot_deviation(trajectories, "ResNet50", f"{PATH} {episode=}")
         if np.sum(rewards) > max_reward:
             torch.save(model.state_dict(), f"{PATH}.pt")
