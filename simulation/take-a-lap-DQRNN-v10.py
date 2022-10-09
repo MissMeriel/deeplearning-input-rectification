@@ -56,7 +56,7 @@ def main():
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
-    PATH = f"{newdir}/SB3-v10-actorcritic-continuousaction"
+    PATH = f"{newdir}/SB3-v10-DQN6"
     import gym
     from beamng_env import CarEnv
     env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents')
@@ -64,8 +64,6 @@ def main():
     check_env(env)
     num_episodes = 100000
     start_time = time.time()
-
-
     # Initialize RL algorithm type and parameters
     model = DQN(
         "CnnPolicy",
