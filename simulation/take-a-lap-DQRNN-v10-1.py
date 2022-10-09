@@ -53,12 +53,12 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-v10-{timestr}-{randstr}"
+    newdir = f"RLtrain-v101-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
-    PATH = f"{newdir}/SB3-v10-DQN6action"
+    PATH = f"{newdir}/SB3-v101-DQN6action-rew5000"
     import gym
     from beamng_env import CarEnv
     env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents')
@@ -66,6 +66,8 @@ def main():
     check_env(env)
     num_episodes = 100000
     start_time = time.time()
+
+
     # Initialize RL algorithm type and parameters
     model = DQN(
         "CnnPolicy",
