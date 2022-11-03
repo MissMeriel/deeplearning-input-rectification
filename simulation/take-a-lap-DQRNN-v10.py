@@ -81,7 +81,7 @@ def main():
         exploration_fraction=0.1,
         exploration_final_eps=0.01,
         device="cuda",
-        tensorboard_log="./tb_logs/",
+        tensorboard_log="./tb_logs_v10/",
     )
 
     # Create an evaluation callback with the same env, called every 10000 iterations
@@ -100,12 +100,12 @@ def main():
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps
     model.learn(
-        total_timesteps=5e5, tb_log_name="dqn_sb3_car_run_" + str(time.time()), **kwargs
+        total_timesteps=5e5, tb_log_name="dqn_v10_sb3_car_run_" + str(time.time()), **kwargs
     )
 
     # Save policy weights
-    model.save("dqn_sb3_car_policy.pt")
-
+    model.save("dqn_v10_sb3_car_policy.pt")
+    print(f"Time to train: {(time.time()-start_time)/60:.1f} minutes")
 
 
 if __name__ == '__main__':

@@ -53,16 +53,20 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-v101-{timestr}-{randstr}"
+    newdir = f"RLtrain-v1022badmodel-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
-    PATH = f"{newdir}/SB3-v101-DQN6action-rew5000"
+    PATH = f"{newdir}/SB3-v1022badmodel-DQN6action-rew5000"
     import gym
     from beamng_env import CarEnv
-    env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents')
+    env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
+                 # beamnginstance="BeamNG.researchINSTANCE3", port=64356, road_id="13091", reverse=False)
+                 beamnginstance="BeamNG.researchINSTANCE4", port=64956, road_id="10673", reverse=False)
+
     from stable_baselines3.common.env_checker import check_env
+
     check_env(env)
     start_time = time.time()
 
@@ -81,9 +85,9 @@ def main():
         exploration_fraction=0.1,
         exploration_final_eps=0.01,
         device="cuda",
-        tensorboard_log="./tb_logs_v101-badmodel/",
+        tensorboard_log=f"./{newdir}/tb_logs_v1022-badmodel/",
     )
-    # model.load("best-model")
+    model.load("RLtrain-v102badmodel-10_21-15_17-HGT33S/best_model")
     # Create an evaluation callback with the same env, called every 10000 iterations
     callbacks = []
     eval_callback = EvalCallback(
@@ -100,11 +104,11 @@ def main():
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps
     model.learn(
-        total_timesteps=5e5, tb_log_name="dqn_v101_sb3_car_run_" + str(time.time()), **kwargs
+        total_timesteps=5e5, tb_log_name="dqn_v1022badmodel_sb3_car_run_" + str(time.time()), **kwargs
     )
 
     # Save policy weights
-    model.save(f"{PATH}-dqn_v101_sb3_car_policy.pt")
+    model.save(f"{PATH}-dqn_v1022badmodel_sb3_car_policy.pt")
     print(f"Time to train: {(time.time()-start_time)/60:.1f} minutes")
 
 

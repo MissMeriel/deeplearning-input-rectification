@@ -57,12 +57,15 @@ class CarEnv(gym.Env):
     metadata = {"render.modes": ["rgb_array"]}
 
     def __init__(self, image_shape=(3, 135, 240), model="DQN", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
-                 beamnginstance="BeamNG.research", port=64356, road_id="12146", reverse=False):
+                 beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
+                 base_model=None):
         super(CarEnv, self).__init__()
+        self.action_space = spaces.Box(low=-1, high=1, shape=(1,1))
         self.beamngpath = beamngpath
-        # self.default_scenario = 'hirochi_raceway'
-        # self.road_id = "9039"
-        self.default_scenario = "west_coast_usa"
+        if base_model is not None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.base_model = torch.load(base_model, map_location=device).eval() #torch.load(base_model).to(device)
+        self.default_scenario = scenario
         self.road_id = road_id
         self.reverse = reverse
         self.integral = 0.0
@@ -77,6 +80,7 @@ class CarEnv(gym.Env):
         self.roadright = []
         self.trajectories, self.current_trajectory = [], []
         self.all_rewards, self.current_rewards = [], []
+        self.actions, self.base_model_inf = [], []
         self.image_shape = image_shape
         self.steps_per_sec = 30
         self.runtime = 0.0
@@ -85,10 +89,9 @@ class CarEnv(gym.Env):
         setup_logging()
         self.model = model
         self.deflation_pattern = filepathroot
-        # beamng = BeamNGpy('localhost', 64556, home=f"{self.beamngpath}/BeamNG.research.v1.7.0.1", user=f"{self.beamngpath}/BeamNG.researchINSTANCE2")
         beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
 
-        self.scenario = Scenario(self.default_scenario, 'research_test')
+        self.scenario = Scenario(self.default_scenario, 'RL_Agent-test')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")
 
         self.setup_sensors()
@@ -119,7 +122,7 @@ class CarEnv(gym.Env):
         self.bng.start_scenario()
         print("Pausing BeamNG...")
         self.bng.pause()
-        #xxxxxxx
+
         print(f"midpoint={self.centerline_interpolated[int(len(self.centerline_interpolated)/2)]}")
 
         freecams = self.scenario.render_cameras()
@@ -137,38 +140,10 @@ class CarEnv(gym.Env):
             "prev_pose": None,
             "collision": False,
         }
-        self.action_space = spaces.Discrete(7)
+
         self.image = None
         self.car_state = None
 
-    def _do_action(self, action):
-        sensors = self.bng.poll_sensors(self.vehicle)
-        kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
-        dt = (sensors['timer']['time'] - self.start_time) - self.runtime
-        self.runtime = sensors['timer']['time'] - self.start_time
-        throttle = self.throttle_PID(kph, dt)
-        if action == 0:
-            steer = 0
-        elif action == 1:
-            steer = 0.5
-        elif action == 2:
-            steer = -0.5
-        elif action == 3:
-            steer = 0.25
-        elif action == 4:
-            steer = -0.25
-        elif action == 5:
-            steer = 1.0
-        else:
-            steer = -1.0
-
-        if abs(steer) > 0.2:
-            self.setpoint = 30
-        else:
-            self.setpoint = 40
-
-        self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
-        self.bng.step(1, wait=True)
 
     def _get_obs(self):
         self.state["prev_pose"] = self.vehicle.state["pos"]
@@ -180,7 +155,9 @@ class CarEnv(gym.Env):
         self.state["pose"] = self.vehicle.state["pos"]
         self.state["collision"] = sensors["damage"]["damage"] > 0
         image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        image = self.rgb2gray(image).reshape(self.image_shape)
+        if self.image_shape[0] == 1:
+            image = self.rgb2gray(image)
+        image = image.reshape(self.image_shape)
         return image
 
     def rgb2gray(self, rgb):
@@ -189,17 +166,63 @@ class CarEnv(gym.Env):
         return np.array(gray, dtype=np.uint8)
 
     def step(self, action):
-        self.actions.append(action)
-        self._do_action(action)
-        obs = self._get_obs()
-        outside_track, distance_from_center = self.has_car_left_track()
-        if outside_track:
-            reward = -5000
+        sensors = self.bng.poll_sensors(self.vehicle)
+        kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
+        dt = (sensors['timer']['time'] - self.start_time) - self.runtime
+        self.runtime = sensors['timer']['time'] - self.start_time
+        throttle = self.throttle_PID(kph, dt)
+        image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+        transform = T.Compose([T.ToTensor()])
+        features = transform(image)[None]
+        base_model_inf = self.base_model(features).item()
+        self.base_model_inf.append(base_model_inf)
+
+        # while self.evaluator() == 1:
+        while True:
+            print(f"\t{base_model_inf=:.3f}\t RL_action={action.item():.3f}")
+
+            outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
+            done = outside_track or self.state["collision"]
+
+            if done:
+                obs = self._get_obs()
+                reward = math.pow(2, 4.0 - distance_from_center)
+                return obs, reward, done, self.state
+
+            if abs(base_model_inf) > 0.2:
+                self.setpoint = 30
+            else:
+                self.setpoint = 40
+
+            self.vehicle.control(throttle=throttle, steering=base_model_inf, brake=0.0)
+            self.bng.step(1, wait=True)
+
+            self.actions.append(action)
+
+            sensors = self.bng.poll_sensors(self.vehicle)
+            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
+            dt = (sensors['timer']['time'] - self.start_time) - self.runtime
+            self.runtime = sensors['timer']['time'] - self.start_time
+            throttle = self.throttle_PID(kph, dt)
+            image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            transform = T.Compose([T.ToTensor()])
+            features = transform(image)[None]
+            base_model_inf = self.base_model(features).item()
+            self.base_model_inf.append(base_model_inf)
+
+        if abs(action) > 0.2:
+            self.setpoint = 30
         else:
-            reward = math.pow(2, 4.0 - distance_from_center)
+            self.setpoint = 40
+
+        self.vehicle.control(throttle=throttle, steering=action.item(), brake=0.0)
+        self.bng.step(1, wait=True)
+        obs = self._get_obs()
+        outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
+        reward = math.pow(2, 4.0 - distance_from_center)
         done = outside_track or self.state["collision"]
         self.current_rewards.append(reward)
-        # print(f"STEP() {action=}\t{reward=:.2f}\t{done=}\t{outside_track=}\t{self.state['collision']=}")
+        print(f"STEP() \n\taction={action.item():.3f}\t{base_model_inf=:.2f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
         return obs, reward, done, self.state
 
     def reset(self):
@@ -227,7 +250,10 @@ class CarEnv(gym.Env):
         self.start_time = sensors['timer']['time']
         self.image = np.array(sensors['front_cam']['colour'].convert('RGB'))
         # image = np.array(sensors['front_cam']['colour'].convert('RGB'))
-        self.image = self.rgb2gray(self.image).reshape(self.image_shape)
+        # self.image = self.rgb2gray(self.image).reshape(self.image_shape)
+        if self.image_shape[0] == 1:
+            self.image = self.rgb2gray(self.image)
+        self.image = self.image.reshape(self.image_shape)
         self.outside_track = False
         self.done = False
         self.action_inputs = [-1, 0, 1]
@@ -238,6 +264,36 @@ class CarEnv(gym.Env):
 
     def render(self):
         return self._get_obs()
+
+    # bad = 0, good = 1
+    def evaluator(self, steer=None):
+        outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
+        if steer is None:
+            steer = self.base_model_inf[-1]
+        if leftrightcenter == 0 and abs(steer) < 1.1 and segment_shape == 0:
+            # centered, driving straight, straight road
+            print(f"EVAL(base_model_inf={steer:.3f})=GOOD \n\tcentered, driving straight, straight road")
+            return 1
+        elif leftrightcenter == 0 and steer < -0.05 and segment_shape == 1:
+            # centered, driving left, left curve road
+            print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tcentered, driving left, left curve road")
+            return 1
+        elif leftrightcenter == 0 and steer > 0.05 and segment_shape == 2:
+            # centered, driving right, right curve road
+            print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tcentered, driving right, right curve road")
+            return 1
+        elif leftrightcenter == 1 and steer > 0.05:
+            # left of center, turning right
+            print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tleft of center, turning right")
+            return 1
+        elif leftrightcenter == 2 and steer < -0.05:
+            # right of center, turning left
+            print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tright of center, turning left")
+            return 1
+        else:
+            print(f"EVAL(base_model_inf={steer:.3f})=BAD")
+            return 0
+
 
     ################################# BEAMNG HELPERS #################################
 
@@ -318,8 +374,8 @@ class CarEnv(gym.Env):
                 return {'pos': (622.163330078125,-251.1154022216797,146.99), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
             elif self.road_id == "13306":
                 return {'pos': (-310,-790.044921875,137.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -30)}
-            # elif self.road_id == "":
-            #     return {'pos': (), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), 0)}
+            elif self.road_id == "13341":
+                return {'pos': (-393.4385986328125,-34.0107536315918,109.64727020263672), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), 90)}
             # elif self.road_id == "":
             #     return {'pos': (), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), 0)}
             # elif self.road_id == "":
@@ -363,9 +419,13 @@ class CarEnv(gym.Env):
                 # starting line
                 return {'pos': (487.25, 178.73, 131.928), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
             elif self.road_id == "7991":
-                return {'pos': (57.229, 360.560, 128.203), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
+                return {'pos': (57.229, 360.560, 128.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
             elif self.road_id == "8293":
                 return {'pos': (-556.185, 386.985, 145.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.702719, 0.711467), 120)}
+            elif self.road_id == '8185': # highway (open, farm-like)
+                # return {'pos': (174.9,-289.7,120.8), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.704635, 0.70957), 180)}
+                return {'pos': (36.742,-269.105,120.461), 'rot': None, 'rot_quat': (-0.0070,0.0082,0.7754,0.6314)}
+                # return {'pos': (-294.791, -255.693, 118.703), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.704635, 0.70957), 180)}
             elif self.road_id == 'starting line 30m down':
                 # 30m down track from starting line
                 return {'pos': (530.25, 178.73, 131.928), 'rot': None, 'rot_quat': (0, 0, -0.702719, 0.711467)}
@@ -436,54 +496,40 @@ class CarEnv(gym.Env):
             return {'pos': (-9.99082, 580.726, 156.72), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
 
     def create_ai_line_from_road_with_interpolation(self):
-        line,points,point_colors,spheres,sphere_colors,traj = [], [], [], [], [], []
-        print("Performing road analysis...")
+        line,points,point_colors,spheres,sphere_colors, traj = [], [], [], [], [], []
         self.road_analysis()
+        print("spawn point:{}".format(self.spawn))
         print(f"{self.actual_middle[0]=}")
         print(f"{self.actual_middle[-1]=}")
-        middle_end = self.adjusted_middle[:3]
-        middle = self.adjusted_middle[3:]
-        temp = [list(self.spawn['pos'])]; temp.extend(middle); middle = temp
-        middle.extend(middle_end)
-        self.remaining_centerline = copy.deepcopy(middle)
-        timestep = 0.1; elapsed_time = 0; count = 0
-        # set up adjusted centerline
-        for i,p in enumerate(middle[:-1]):
+        elapsed_time = 0
+        for i,p in enumerate(self.actual_middle[:-1]):
             # interpolate at 1m distance
-            if self.distance(p, middle[i+1]) > 1:
-                y_interp = interpolate.interp1d([p[0], middle[i+1][0]], [p[1], middle[i+1][1]])
-                num = int(self.distance(p, middle[i+1]))
-                xs = np.linspace(p[0], middle[i+1][0], num=num, endpoint=True)
+            if self.distance(p, self.actual_middle[i+1]) > 1:
+                y_interp = interpolate.interp1d([p[0], self.actual_middle[i+1][0]], [p[1], self.actual_middle[i+1][1]])
+                num = int(self.distance(p, self.actual_middle[i+1]))
+                xs = np.linspace(p[0], self.actual_middle[i+1][0], num=num, endpoint=True)
                 ys = y_interp(xs)
-                for x,y in zip(xs,ys):
-                    traj.append([x,y])
+                for x,y in zip(xs, ys):
+                    traj.append([x, y])
             else:
-                elapsed_time += self.distance(p, middle[i+1]) / 12
+                elapsed_time += self.distance(p, self.actual_middle[i+1]) / 12
                 traj.append([p[0],p[1]])
                 linedict = {"x": p[0], "y": p[1], "z": p[2], "t": elapsed_time}
                 line.append(linedict)
-                count += 1
         # set up debug line
         for i,p in enumerate(self.actual_middle[:-1]):
             points.append([p[0], p[1], p[2]])
             point_colors.append([0, 1, 0, 0.1])
             spheres.append([p[0], p[1], p[2], 0.25])
             sphere_colors.append([1, 0, 0, 0.8])
-            count += 1
-        print("spawn point:{}".format(self.spawn))
-        print("beginning of script:{}".format(middle[0]))
-        # remaining_centerline = copy.deepcopy(traj)
         self.centerline_interpolated = copy.deepcopy(traj)
-        self.bng.add_debug_line(points, point_colors,
-                           spheres=spheres, sphere_colors=sphere_colors,
-                           cling=True, offset=0.1)
+        self.bng.add_debug_line(points, point_colors, spheres=spheres, sphere_colors=sphere_colors, cling=True, offset=0.1)
         return line
 
     def ms_to_kph(self, wheelspeed):
         return wheelspeed * 3.6
 
     def throttle_PID(self, kph, dt):
-        # global integral, prev_error, setpoint
         kp = 0.19;
         ki = 0.0001;
         kd = 0.008
@@ -504,7 +550,9 @@ class CarEnv(gym.Env):
         return math.sqrt(sqr)
 
     def road_analysis(self):
-        # self.get_nearby_racetrack_roads(point_of_in=(-6.089651107788086, -832.5692749023438, 132.27188110351562))
+        print("Performing road analysis...")
+        # self.get_nearby_racetrack_roads(point_of_in=(-391.0,-798.8, 139.7))
+        # self.get_nearby_racetrack_roads(point_of_in=(57.04786682128906, -150.53302001953125, 125.5))
         # self.plot_racetrack_roads()
 
         print(f"Getting road {self.road_id}...")
@@ -519,7 +567,7 @@ class CarEnv(gym.Env):
         self.roadright = [edge['right'] for edge in edges]
         self.adjusted_middle = [edge['middle'] for edge in edges]
         self.centerline = self.actual_middle
-        # return actual_middle, adjusted_middle
+
 
     def plot_racetrack_roads(self):
         roads = self.bng.get_roads()
@@ -575,7 +623,7 @@ class CarEnv(gym.Env):
             plt.plot(x_temp, y_temp, symb, label=road)
             print(f"{road=}\tstart=({x_temp[0]},{y_temp[0]},{road_edges[0]['middle'][2]})\t{road_edges[0]['middle']}")
         plt.plot([point_of_in[0]], [point_of_in[1]], "bo")
-        plt.title(f"{self.default_scenario} poi={point_of_in} (start of road_id=12492)")
+        plt.title(f"{self.default_scenario} poi={point_of_in}")
         plt.legend(ncol=10)
         plt.show()
         plt.pause(0.001)
@@ -590,11 +638,55 @@ class CarEnv(gym.Env):
 
     # track ~12.50m wide; car ~1.85m wide
     def has_car_left_track(self):
+        self.vehicle.update_vehicle()
         vehicle_pos = self.vehicle.state['pos']
         vehicle_bbox = self.vehicle.get_bbox()
         distance_from_centerline = self.dist_from_line(self.centerline_interpolated, vehicle_pos)
         dist = min(distance_from_centerline)
-        return dist > 4.0, dist
+        i = np.where(distance_from_centerline == dist)[0][0]
+        leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1)
+        segment_shape = self.get_current_segment_shape(vehicle_pos)
+        return dist > 4.0, dist, leftrightcenter, segment_shape
+
+    def get_current_segment_shape(self, vehicle_pos):
+        distance_from_centerline = self.dist_from_line(self.actual_middle, vehicle_pos)
+        dist = min(distance_from_centerline)
+        i = np.where(distance_from_centerline == dist)[0][0]
+        # print(f"{i=}\t{vehicle_pos=}")
+        A = np.array(self.actual_middle[(i + 1) % len(self.actual_middle)])
+        B = np.array(self.actual_middle[i])
+        C = np.array(self.roadright[i])
+        try:
+            theta = math.acos(np.vdot(B-A, B-C) / np.linalg.norm(B-A) * np.linalg.norm(B-C))
+        except ValueError:
+            print(f"{A=}\t{B=}\t{C=}")
+            theta = 0
+        theta_deg = math.degrees(theta)
+        # print(f"{math.degrees(theta)=:.1f}")
+        if theta_deg > 100:
+            # print(f"Road curving left \t{theta_deg=:.1f}")
+            return 1
+        elif theta_deg < 80:
+            # print(f"Road curving right \t{theta_deg=:.1f}")
+            return 2
+        else:
+            # print(f"Road is straight \t{theta_deg=:.1f}")
+            return 0
+
+    def get_position_relative_to_centerline(self, dist, i, centerdist=1):
+        A = self.centerline_interpolated[i]
+        B = self.centerline_interpolated[(i + 1) % len(self.centerline_interpolated)]
+        P = self.vehicle.state['pos']
+        d = (P[0]-A[0])*(B[1]-A[1])-(P[1]-A[1])*(B[0]-A[0])
+        if abs(dist) < centerdist:
+            # print(f"CENTER, {dist=:.1f} {d=:.1f}")
+            return 0
+        elif d < 0:
+            # print(f"LEFT, {dist=:.1f} {d=:.1f}")
+            return 1
+        elif d > 0:
+            # print(f"RIGHT, {dist=:.1f} {d=:.1f}")
+            return 2
 
 
     def dist_from_line(self, centerline, point):
@@ -633,15 +725,6 @@ class CarEnv(gym.Env):
         c = d_pa[:, 0] * d[:, 1] - d_pa[:, 1] * d[:, 0]
 
         return np.hypot(h, c)
-
-    ''' TODO: DELETE? '''
-    def calc_deviation_from_center(self, centerline, traj):
-        dists = []
-        for point in traj:
-            dist = self.dist_from_line(centerline, point)
-            dists.append(min(dist))
-        stddev = statistics.stdev(dists)
-        return stddev
 
     def plot_deviation(self, model, deflation_pattern, start_viz=False):
         # global centerline, roadleft, roadright

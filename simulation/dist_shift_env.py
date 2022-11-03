@@ -35,9 +35,7 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 '''
-Actor-Critic Learner with continuous action space
-actor-critic model based on Microsoft example:
-https://github.com/microsoft/AI-For-Beginners/blob/main/lessons/6-Other/22-DeepRL/CartPole-RL-TF.ipynb
+SPAWNS RELY ON BEAMNG.TECH
 DQN from microsoft example:
 https://microsoft.github.io/AirSim/reinforcement_learning/
 '''
@@ -49,17 +47,19 @@ if is_ipython:
 
 import gym
 from gym import spaces
-# from airgym.envs.airsim_env import AirSimEnv
 
-
-class CarEnv(gym.Env):
+class FaultInducingEnv(gym.Env):
 
     metadata = {"render.modes": ["rgb_array"]}
 
     def __init__(self, image_shape=(3, 135, 240), model="DQN", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
-                 beamnginstance="BeamNG.research", port=64356, road_id="12146", reverse=False):
-        super(CarEnv, self).__init__()
+                 beamnginstance="BeamNG.research", port=64356, road_id="12146", reverse=False, newdir=".", expert=None):
+        super(FaultInducingEnv, self).__init__()
         self.beamngpath = beamngpath
+        self.newdir = newdir
+        self.expert = expert
+        if not os.path.exists(f"{self.newdir}/images"):
+            os.mkdir(f"{self.newdir}/images")
         # self.default_scenario = 'hirochi_raceway'
         # self.road_id = "9039"
         self.default_scenario = "west_coast_usa"
@@ -86,7 +86,7 @@ class CarEnv(gym.Env):
         self.model = model
         self.deflation_pattern = filepathroot
         # beamng = BeamNGpy('localhost', 64556, home=f"{self.beamngpath}/BeamNG.research.v1.7.0.1", user=f"{self.beamngpath}/BeamNG.researchINSTANCE2")
-        beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
+        beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.tech.v0.21.3.0', user=f'{self.beamngpath}/{beamnginstance}')
 
         self.scenario = Scenario(self.default_scenario, 'research_test')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")
@@ -102,7 +102,7 @@ class CarEnv(gym.Env):
         eagles_eye_cam = Camera(cam_pos, #(0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
                                 (self.spawn['rot_quat'][0], self.spawn['rot_quat'][1], -1.39813470840454, 0.91656774282455),
                                 fov=90, resolution=(1500, 1500),
-                                colour=True, depth=False, annotation=False)
+                                colour=True, depth=False, annotation=True)
         self.scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
 
         self.scenario.make(beamng)
@@ -147,21 +147,22 @@ class CarEnv(gym.Env):
         dt = (sensors['timer']['time'] - self.start_time) - self.runtime
         self.runtime = sensors['timer']['time'] - self.start_time
         throttle = self.throttle_PID(kph, dt)
-        if action == 0:
-            steer = 0
-        elif action == 1:
-            steer = 0.5
-        elif action == 2:
-            steer = -0.5
-        elif action == 3:
-            steer = 0.25
-        elif action == 4:
-            steer = -0.25
-        elif action == 5:
-            steer = 1.0
-        else:
-            steer = -1.0
-
+        # if action == 0:
+        #     steer = 0
+        # elif action == 1:
+        #     steer = 0.5
+        # elif action == 2:
+        #     steer = -0.5
+        # elif action == 3:
+        #     steer = 0.25
+        # elif action == 4:
+        #     steer = -0.25
+        # elif action == 5:
+        #     steer = 1.0
+        # else:
+        #     steer = -1.0
+        steer = action
+        print(f"{steer=}")
         if abs(steer) > 0.2:
             self.setpoint = 30
         else:
@@ -179,8 +180,14 @@ class CarEnv(gym.Env):
         self.car_state = sensors #self.getCarState(sensors)
         self.state["pose"] = self.vehicle.state["pos"]
         self.state["collision"] = sensors["damage"]["damage"] > 0
-        image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        image = self.rgb2gray(image).reshape(self.image_shape)
+        sensors['front_cam']['colour'].convert('RGB').save(f"{self.newdir}/images/rgb-ep{self.total_episodes:05d}-{self.total_loops:05d}.jpg")
+        sensors['front_cam']['annotation'].convert('RGB').save(f"{self.newdir}/images/seg-ep{self.total_episodes:05d}-{self.total_loops:05d}.jpg")
+        # sensors['front_cam']['depth'].convert('RGB').save(f"{self.newdir}/images/depth-ep{self.total_episodes:05d}-{self.total_loops:05d}.jpg")
+        image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8).reshape(self.image_shape)
+        # image = self.rgb2gray(image).reshape(self.image_shape)
+        # transform = T.Compose([T.ToTensor()])
+        # image = transform(np.asarray(image))[None]
+        self.total_loops += 1
         return image
 
     def rgb2gray(self, rgb):
@@ -189,7 +196,6 @@ class CarEnv(gym.Env):
         return np.array(gray, dtype=np.uint8)
 
     def step(self, action):
-        self.actions.append(action)
         self._do_action(action)
         obs = self._get_obs()
         outside_track, distance_from_center = self.has_car_left_track()
@@ -223,21 +229,23 @@ class CarEnv(gym.Env):
         self.transform = transforms.Compose([transforms.ToTensor()])
         self.prev_error = self.setpoint
         self.overall_damage, self.runtime, self.wheelspeed, self.distance_from_center = 0.0, 0.0, 0.0, 0.0
-        self.total_loops, self.total_imgs, self.total_predictions = 0, 0, 0
+        self.total_loops, self.total_imgs, self.total_predictions, self.total_episodes = 0, 0, 0, 0
         self.start_time = sensors['timer']['time']
-        self.image = np.array(sensors['front_cam']['colour'].convert('RGB'))
+        self.image = np.array(sensors['front_cam']['colour'].convert('RGB')).reshape(self.image_shape)
         # image = np.array(sensors['front_cam']['colour'].convert('RGB'))
-        self.image = self.rgb2gray(self.image).reshape(self.image_shape)
+        # self.image = self.rgb2gray(self.image).reshape(self.image_shape)
         self.outside_track = False
         self.done = False
         self.action_inputs = [-1, 0, 1]
         self.action_indices = [0, 1, 2]
         self.states, self.actions, self.probs, self.rewards, self.critic_values = [], [], [], [], []
         self.traj = []
+        self.total_episodes += 1
         return self._get_obs()
 
     def render(self):
         return self._get_obs()
+
 
     ################################# BEAMNG HELPERS #################################
 
@@ -247,7 +255,7 @@ class CarEnv(gym.Env):
         fov = 51  # 60 works for full lap #63 breaks on hairpin turn
         resolution = (self.image_shape[2], self.image_shape[1])  # (400,225) #(320, 180) #(1280,960) #(512, 512)
         front_camera = Camera(camera_pos, camera_dir, fov, resolution,
-                              colour=True, depth=True, annotation=True)
+                              colour=True, depth=False, annotation=True)
         gforces = GForces()
         electrics = Electrics()
         damage = Damage()
@@ -312,7 +320,7 @@ class CarEnv(gym.Env):
                 return {'pos': (57.04786682128906, -150.53302001953125, 125.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -115)}
             elif self.road_id == "10673":
                 return {'pos': (-21.712169647216797, -826.2122802734375, 133.1), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
-            elif self.road_id == "12930": # 13492 dirt road
+            elif self.road_id == "15425": # 13492 dirt road
                 return {'pos': (-347.16302490234375,-824.6746215820312,137.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
             elif self.road_id == "10988":
                 return {'pos': (622.163330078125,-251.1154022216797,146.99), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
@@ -472,7 +480,7 @@ class CarEnv(gym.Env):
             count += 1
         print("spawn point:{}".format(self.spawn))
         print("beginning of script:{}".format(middle[0]))
-        # remaining_centerline = copy.deepcopy(traj)
+        remaining_centerline = copy.deepcopy(traj)
         self.centerline_interpolated = copy.deepcopy(traj)
         self.bng.add_debug_line(points, point_colors,
                            spheres=spheres, sphere_colors=sphere_colors,
@@ -504,7 +512,7 @@ class CarEnv(gym.Env):
         return math.sqrt(sqr)
 
     def road_analysis(self):
-        # self.get_nearby_racetrack_roads(point_of_in=(-6.089651107788086, -832.5692749023438, 132.27188110351562))
+        # self.get_nearby_racetrack_roads(point_of_in=self.spawn_point()['pos']) #(-6.089651107788086, -832.5692749023438, 132.27188110351562))
         # self.plot_racetrack_roads()
 
         print(f"Getting road {self.road_id}...")
@@ -575,7 +583,7 @@ class CarEnv(gym.Env):
             plt.plot(x_temp, y_temp, symb, label=road)
             print(f"{road=}\tstart=({x_temp[0]},{y_temp[0]},{road_edges[0]['middle'][2]})\t{road_edges[0]['middle']}")
         plt.plot([point_of_in[0]], [point_of_in[1]], "bo")
-        plt.title(f"{self.default_scenario} poi={point_of_in} (start of road_id=12492)")
+        plt.title(f"{self.default_scenario} poi={point_of_in}")
         plt.legend(ncol=10)
         plt.show()
         plt.pause(0.001)

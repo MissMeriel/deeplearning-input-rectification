@@ -1,3 +1,50 @@
+import shutil
+import os
+import string
+import cv2
+import random
+import numpy as np
+import matplotlib
+from matplotlib import pyplot as plt
+import logging
+from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
+from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
+
+import scipy.misc
+import copy
+import torch
+import torchvision.transforms as transforms
+import statistics, math
+from scipy.spatial.transform import Rotation as R
+from scipy import interpolate
+import PIL
+import time
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import torchvision.transforms as T
+from stable_baselines3 import DQN
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
+from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.callbacks import EvalCallback
+
+'''
+Actor-Critic Learner with continuous action space
+actor-critic model based on Microsoft example:
+https://github.com/microsoft/AI-For-Beginners/blob/main/lessons/6-Other/22-DeepRL/CartPole-RL-TF.ipynb
+DQN from microsoft example:
+https://microsoft.github.io/AirSim/reinforcement_learning/
+'''
+
+# set up matplotlib
+is_ipython = 'inline' in matplotlib.get_backend()
+if is_ipython:
+    from IPython import display
+
+
 import os.path
 
 import cv2
@@ -24,8 +71,8 @@ from simulator import Simulator
 
 # globals
 default_color = 'green' #'Red'
-default_scenario = 'automation_test_track'
-default_spawnpoint = 'highway'
+default_scenario = 'industrial' #'automation_test_track'
+default_spawnpoint = 'racetrackstartinggate'
 integral = 0.0
 prev_error = 0.0
 overall_throttle_setpoint = 40
@@ -488,8 +535,7 @@ def setup_beamng(vehicle_model='etk800', model_filename="H:/GitHub/DAVE2-Keras/t
     # find_width_of_road(bng)
     return vehicle, bng, scenario, model
 
-def run_scenario(vehicle, bng, scenario, model, vehicle_model='etk800',
-                 camera_pos=(-0.5, 0.38, 1.3), camera_direction=(0, 1.0, 0), pitch_euler=0.0, run_number=0,
+def run_scenario(vehicle, bng, scenario, model, run_number=0,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     global base_filename, default_color, default_scenario,default_spawnpoint, steps_per_sec
     global integral, prev_error, setpoint
@@ -634,39 +680,34 @@ def add_barriers(scenario):
 def main():
     global base_filename, default_color, default_scenario, setpoint, integral
     global prev_error, centerline
-    # camera_zs = [1.3] #[0.87, 1.07, 1.3, 1.51, 1.73]
-    # with open(training_file, 'w') as f:
-    #     f.write("CAMERA_DIR,CAMERA_PITCH_EULER,CAMERA_POS,RUNTIME,DISTANCE,AVG_STDEV,RUN_SCORE\n")
-    #     for z in camera_zs:
-    camera_pos = (-0.5, 0.38, 1.3)
-    camera_dir = (0, 1.0, 0)
-    model_name = "model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    model_name = "model-DAVE2PytorchModel-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    model_name = "model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-59Ksamples-135x240-NOROBUSTIFICATION.pt" #"model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-59Ksamples-135x240-noiseflipblur.pt"
-    model_filename = "H:/GitHub/DAVE2-Keras/{}".format(model_name)
-    model_name = "dave2/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    # vehicle, bng, scenario, model = Simulator(vehicle_model='hopper', vehicle_color=default_color,
-    #                                             scenario=default_scenario, spawn_point=default_spawnpoint,
-    #                                             camera_pos=camera_pos, camera_direction=camera_dir,
-    #                                             model_filename=model_filename)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+    localtime = time.localtime()
+    timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
+    newdir = f"deletelater-policymonitor1-{timestr}-{randstr}"
+    if not os.path.exists(newdir):
+        os.mkdir(newdir)
+        shutil.copy(f"{__file__}", newdir)
+        shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
+    PATH = f"{newdir}/policymonitor1"
+    start_time = time.time()
+
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    sim =Simulator(scenario=default_scenario, spawnpoint=default_spawnpoint)
-    vehicle, bng, scenario, model = sim.setup_beamng(model_filename=model_filename)
+    vehicle, bng, scenario, model = Simulator(vehicle_model='hopper', vehicle_color=default_color,
+                                                scenario=default_scenario, spawn_point=default_spawnpoint,
+                                                camera_pos=(-0.5, 0.38, 1.3), camera_direction=(0, 1.0, 0),
+                                                model_filename=model_filename)
+
     for i in range(1):
-        # print("\nRun {} for camera z={}".format(i, z))
-        results = run_scenario(vehicle, bng, scenario, model, vehicle_model='hopper', camera_pos=camera_pos, camera_direction=camera_dir, run_number=i)
+        results = run_scenario(vehicle, bng, scenario, model, vehicle_model='hopper', run_number=i)
         results['distance'] = get_distance_traveled(results['traj'])
-        # print("Writing trajectory to file...")
-        # with open(f"{model._get_name()}-lap-trajectory.txt", "w") as f:
-        #     for p in results['traj']:
-        #         f.write(f"{p}\n")
-        # print(f"Trajectory written to file {model._get_name()}-lap-trajectory.txt")
-        # sample_entry = f"runtime={results['runtime']:.2f}-dist_travelled={results['distance']:.2f}-stdev={results['deviation"]:.2f}")
         plot_trajectory(results['traj'], f"{model._get_name()}-40kph-runtime{results['runtime']:.2f}-distance{results['distance']:.2f}")
-        # f.write("{}\n".format(sample_entry))
     bng.close()
+    print(f"Time to train: {(time.time()-start_time)/60:.1f} minutes")
 
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True
+    logging.getLogger('PIL').setLevel(logging.WARNING)
     main()

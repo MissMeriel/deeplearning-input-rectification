@@ -40,7 +40,7 @@ class Simulator():
         self.roadwidth = 9.0 # 8.0
         self.qr_positions = []
         self.road_id = road_id
-        self.expected_trajectory = self.intake_lap_file(f"DAVE2v1-lap-trajectory.txt")
+        # self.expected_trajectory = self.intake_lap_file(f"DAVE2v1-lap-trajectory.txt")
 
     def get_spawnpoint(self):
         if self.scenario == 'automation_test_track':
@@ -602,8 +602,8 @@ class Simulator():
                           home=f'{beamng_parent}/BeamNG.research.v1.7.0.1',
                           user=f'{beamng_parent}/BeamNG.research')
 
-        scenario = Scenario(default_scenario, 'research_test')
-        vehicle = Vehicle('ego_vehicle', model=vehicle_model, licence='EGO', color=default_color)
+        scenario = Scenario(self.scenario, 'research_test')
+        vehicle = Vehicle('ego_vehicle', model=vehicle_model, licence='EGO', color="green")
         vehicle = self.setup_sensors(vehicle, pos=camera_pos, direction=camera_direction)
 
         scenario.add_vehicle(vehicle, pos=self.spawnpoint_pos['pos'], rot=None,
