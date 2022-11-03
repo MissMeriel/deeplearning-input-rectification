@@ -7,3 +7,4 @@ CrashNet*
 # trace files
 track-traces/
 simulation/RLtrain-*
+simulation/tb*
