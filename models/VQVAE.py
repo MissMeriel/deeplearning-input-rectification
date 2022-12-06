@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow.compat.v2 as tf
 import tree
-from vaes.DataGen import DatasetGenerator
+# from vaes.DataGen import DatasetGenerator
+from DataGen import DatasetGenerator
 import time
 import datetime
 import os
@@ -431,7 +432,7 @@ def instantiate_VQVAE():
         commitment_cost=commitment_cost)
 
     model = VQVAEModel(encoder, decoder, vq_vae, pre_vq_conv1, data_variance=0.036)
-    checkpoint_root = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/vaes/checkpoints136x240-origdataset"
+    checkpoint_root = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/models/weights/checkpoints136x240-origdataset"
     checkpoint = tf.train.Checkpoint(module=model)
     latest = tf.train.latest_checkpoint(checkpoint_root)
     print(f"{latest=}")
