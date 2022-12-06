@@ -125,12 +125,12 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-DDPG-testcustomcb-{timestr}-{randstr}"
+    newdir = f"RLtrain-DDPG-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
-    PATH = f"{newdir}/SB3-testcustomcb-DDPG-rew5000"
+    PATH = f"{newdir}/rew2to4minusdist"
 
     from DDPGenv import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
@@ -143,10 +143,10 @@ def main():
                  # port=64156, scenario="west_coast_usa", road_id="12930", reverse=False,
                  base_model=model_filename)
     from stable_baselines3.common.env_checker import check_env
-    check_env(env)
+    # check_env(env)
     start_time = time.time()
     from stable_baselines3 import DDPG
-    from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
+    from stable_baselines3.common.noise import NormalActionNoise
 
     # The noise objects for DDPG
     n_actions = env.action_space.shape[-1]
@@ -159,22 +159,22 @@ def main():
         verbose=1,
         batch_size=32,
         train_freq=4,
-        learning_starts=200000,
+        learning_starts=2000000,
         buffer_size=5000,
         device="cuda",
-        tensorboard_log=f"./{newdir}/tb_logs_DDPG_testcustomcb/",
+        tensorboard_log=f"./{newdir}/tb_logs_DDPG/",
     )
     # Create an evaluation callback with the same env, called every 10000 iterations
     callbacks = []
-    # eval_callback = EvalCallback(
-    #     env,
-    #     callback_on_new_best=None,
-    #     n_eval_episodes=5,
-    #     best_model_save_path=f"./{newdir}",
-    #     log_path=f"./{newdir}",
-    #     eval_freq=10000,
-    # )
-    # callbacks.append(eval_callback)
+    eval_callback = EvalCallback(
+        env,
+        callback_on_new_best=None,
+        n_eval_episodes=5,
+        best_model_save_path=f"./{newdir}",
+        log_path=f"./{newdir}",
+        eval_freq=10000,
+    )
+    callbacks.append(eval_callback)
     custom_callback = PiXCallback(
         env, verbose=1
     )
@@ -183,9 +183,9 @@ def main():
     kwargs = {}
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps
-    model.learn(total_timesteps=5e5, tb_log_name="DDPG-customcb_sb3_car_run_" + str(time.time()), **kwargs)
+    model.learn(total_timesteps=5e5, tb_log_name="DDPG-sb3_car_run_" + str(time.time()), **kwargs)
 
-    model.save(f"{PATH}-DDPG_testcustomcb_sb3_car_policy.pt")
+    model.save(f"{PATH}-DDPG_sb3_car_policy.pt")
     print(f"Time to train: {(time.time()-start_time)/60:.1f} minutes")
 
 

@@ -1,0 +1,32 @@
+take-a-lap=DQRNN-v10-33-DDPGhuman
+SUMMARY OF EPISODE #657
+	total distance travelled:1689.4200866891224
+	total episode reward:12573.607660364369
+	avg dist from centerline:1.5731350927473884
+	percent frames adjusted:0.35920315418136545
+Eval num_timesteps=500000, episode_reward=10299.72 +/- 1685.57
+Episode length: 1440.20 +/- 258.69
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 1.44e+03 |
+|    mean_reward     | 1.03e+04 |
+| time/              |          |
+|    total_timesteps | 500000   |
+---------------------------------
+
+take-a-lap-DQRNNv10-33-DDPGhuman-hardwarefix
+SUMMARY OF EPISODE #715
+	total distance travelled:1077.1538821613958
+	total episode reward:559.9315186452699
+	avg dist from centerline:2.048964022593485
+	percent frames adjusted:0.2516962843295638
+Eval num_timesteps=500000, episode_reward=901.84 +/- 220.08
+Episode length: 1203.40 +/- 270.26
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 1.2e+03  |
+|    mean_reward     | 902      |
+| time/              |          |
+|    total_timesteps | 500000   |
+---------------------------------
+Time to train: 11943.8 minutes

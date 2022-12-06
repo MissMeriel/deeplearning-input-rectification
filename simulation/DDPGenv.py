@@ -60,7 +60,10 @@ class CarEnv(gym.Env):
                  beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
                  base_model=None):
         super(CarEnv, self).__init__()
-        self.action_space = spaces.Box(low=-1, high=1, shape=(1,1))
+        self.action_space = spaces.Box(low=0, high=255, shape=(135, 240, 3), dtype=np.uint8)
+        self.transform = T.Compose([T.ToTensor()])
+        self.frames_adjusted = 0
+        self.episode_steps = 0
         self.beamngpath = beamngpath
         if base_model is not None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -172,14 +175,17 @@ class CarEnv(gym.Env):
         self.runtime = sensors['timer']['time'] - self.start_time
         throttle = self.throttle_PID(kph, dt)
         image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        transform = T.Compose([T.ToTensor()])
-        features = transform(image)[None]
+
+        img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        cv2.imshow("true image", img)
+        cv2.waitKey(1)
+
+        features = self.transform(image)[None]
         base_model_inf = self.base_model(features).item()
         self.base_model_inf.append(base_model_inf)
 
-        # while self.evaluator() == 1:
-        while True:
-            print(f"\t{base_model_inf=:.3f}\t RL_action={action.item():.3f}")
+        while self.evaluator() == 1:
+        # while True:
 
             outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
             done = outside_track or self.state["collision"]
@@ -194,9 +200,15 @@ class CarEnv(gym.Env):
             else:
                 self.setpoint = 40
 
+            blackedout = np.zeros(image.shape)
+            # img = cv2.cvtColor(blackedout, cv2.COLOR_RGB2BGR)
+            cv2.imshow("action image", blackedout)
+            cv2.waitKey(1)
+
             self.vehicle.control(throttle=throttle, steering=base_model_inf, brake=0.0)
             self.bng.step(1, wait=True)
-
+            self.episode_steps += 1
+            self.frames_adjusted += 1
             self.actions.append(action)
 
             sensors = self.bng.poll_sensors(self.vehicle)
@@ -205,35 +217,74 @@ class CarEnv(gym.Env):
             self.runtime = sensors['timer']['time'] - self.start_time
             throttle = self.throttle_PID(kph, dt)
             image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-            transform = T.Compose([T.ToTensor()])
-            features = transform(image)[None]
+            features = self.transform(image)[None]
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-        if abs(action) > 0.2:
+            img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            cv2.imshow("true image", img)
+            cv2.waitKey(1)
+
+        # overlay DDPG output into image
+        # colorseg_img = sensors['front_cam']['annotation'].convert('RGB')
+        # qr_corners, bbox_img = self.get_qr_corners_from_colorseg_image(colorseg_img)
+        # image = self.overlay_transparent(image, np.array(action), np.array(qr_corners[0]))
+        action = np.array(action, dtype=np.uint8)
+
+        # img is rgb, convert to opencv's default bgr
+        img = cv2.cvtColor(action, cv2.COLOR_RGB2BGR)
+        cv2.imshow("action image", img)
+        cv2.waitKey(1)
+
+        transform = T.Compose([T.ToTensor()])
+        features = transform(action)[None]
+        base_model_inf_RL = self.base_model(features).item()
+
+        if abs(base_model_inf_RL) > 0.2:
             self.setpoint = 30
         else:
             self.setpoint = 40
 
-        self.vehicle.control(throttle=throttle, steering=action.item(), brake=0.0)
+        self.vehicle.control(throttle=throttle, steering=base_model_inf_RL, brake=0.0)
         self.bng.step(1, wait=True)
+        self.episode_steps += 1
+
         obs = self._get_obs()
         outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
         reward = math.pow(2, 4.0 - distance_from_center)
         done = outside_track or self.state["collision"]
         self.current_rewards.append(reward)
-        print(f"STEP() \n\taction={action.item():.3f}\t{base_model_inf=:.2f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
+
+        if distance_from_center > 1.5:
+            self.last_good_series.append()
+            self.last_bad_series = []
+        else:
+            self.last_bad_series.append()
+            self.last_good_series = []
+
+        print(f"STEP() \n\tbase_model_inf_RL={base_model_inf_RL:.3f}\t\t{base_model_inf=:.2f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
         return obs, reward, done, self.state
 
     def reset(self):
-        print(f"RESET()")
-        self.trajectories.append(self.current_trajectory)
-        self.all_rewards.append(sum(self.current_rewards))
-        dist = self.get_distance_traveled(self.current_trajectory)
-        # self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode} start", self.deflation_pattern, start_viz=True)
-        self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern, start_viz=False)
-        self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+        print(f"\n\n\nRESET()")
+        if self.episode > 0:
+            print(f"SUMMARY OF EPISODE #{self.episode}")
+            self.trajectories.append(self.current_trajectory)
+            self.all_rewards.append(sum(self.current_rewards))
+            dist = self.get_distance_traveled(self.current_trajectory)
+            dist_from_centerline = []
+            for i in self.current_trajectory:
+                distance_from_centerline = self.dist_from_line(self.centerline_interpolated, i)
+                dist_from_centerline.append(min(distance_from_centerline))
+            print(f"\ttotal distance travelled:{dist}"
+                  f"\n\ttotal reward:{sum(self.current_rewards)}"
+                  f"\n\tavg dist from centerline:{sum(dist_from_centerline) / len(dist_from_centerline)}"
+                  f"\n\tpercent frames adjusted:{self.frames_adjusted / self.episode_steps}")
+            self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern, start_viz=False)
+            self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
         self.episode += 1
+        self.frames_adjusted = 0
+        self.episode_steps = 0
         self.current_trajectory = []
         self.current_rewards = []
         self.integral, self.prev_error = 0.0, 0.0
@@ -241,8 +292,8 @@ class CarEnv(gym.Env):
         self.bng.step(1, wait=True)
         self.vehicle.update_vehicle()
         sensors = self.bng.poll_sensors(self.vehicle)
-        spawnpoint = [290.558, -277.28, 46.0]
-        endpoint = [-346.5, 431.0, 30.8]  # centerline[-1]
+        # spawnpoint = [290.558, -277.28, 46.0]
+        # endpoint = self.actual_middle[-1]
         self.transform = transforms.Compose([transforms.ToTensor()])
         self.prev_error = self.setpoint
         self.overall_damage, self.runtime, self.wheelspeed, self.distance_from_center = 0.0, 0.0, 0.0, 0.0
@@ -256,8 +307,8 @@ class CarEnv(gym.Env):
         self.image = self.image.reshape(self.image_shape)
         self.outside_track = False
         self.done = False
-        self.action_inputs = [-1, 0, 1]
-        self.action_indices = [0, 1, 2]
+        # self.action_inputs = [-1, 0, 1]
+        # self.action_indices = [0, 1, 2]
         self.states, self.actions, self.probs, self.rewards, self.critic_values = [], [], [], [], []
         self.traj = []
         return self._get_obs()
@@ -270,23 +321,23 @@ class CarEnv(gym.Env):
         outside_track, distance_from_center, leftrightcenter, segment_shape = self.has_car_left_track()
         if steer is None:
             steer = self.base_model_inf[-1]
-        if leftrightcenter == 0 and abs(steer) < 1.1 and segment_shape == 0:
+        if leftrightcenter == 0 and abs(steer) < 0.1 and segment_shape == 0:
             # centered, driving straight, straight road
             print(f"EVAL(base_model_inf={steer:.3f})=GOOD \n\tcentered, driving straight, straight road")
             return 1
-        elif leftrightcenter == 0 and steer < -0.05 and segment_shape == 1:
+        elif leftrightcenter == 0 and steer < -0.1 and segment_shape == 1:
             # centered, driving left, left curve road
             print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tcentered, driving left, left curve road")
             return 1
-        elif leftrightcenter == 0 and steer > 0.05 and segment_shape == 2:
+        elif leftrightcenter == 0 and steer > 0.1 and segment_shape == 2:
             # centered, driving right, right curve road
             print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tcentered, driving right, right curve road")
             return 1
-        elif leftrightcenter == 1 and steer > 0.05:
+        elif leftrightcenter == 1 and steer > 0.1:
             # left of center, turning right
             print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tleft of center, turning right")
             return 1
-        elif leftrightcenter == 2 and steer < -0.05:
+        elif leftrightcenter == 2 and steer < -0.1:
             # right of center, turning left
             print(f"EVAL(base_model_inf={steer:.3f})=GOOD\n\tright of center, turning left")
             return 1
@@ -635,16 +686,15 @@ class CarEnv(gym.Env):
         r = R.from_euler('xyz', r, degrees=True)
         return tuple(r.as_quat())
 
-
     # track ~12.50m wide; car ~1.85m wide
     def has_car_left_track(self):
         self.vehicle.update_vehicle()
         vehicle_pos = self.vehicle.state['pos']
-        vehicle_bbox = self.vehicle.get_bbox()
+        # vehicle_bbox = self.vehicle.get_bbox()
         distance_from_centerline = self.dist_from_line(self.centerline_interpolated, vehicle_pos)
         dist = min(distance_from_centerline)
         i = np.where(distance_from_centerline == dist)[0][0]
-        leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1)
+        leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1.5)
         segment_shape = self.get_current_segment_shape(vehicle_pos)
         return dist > 4.0, dist, leftrightcenter, segment_shape
 
@@ -659,14 +709,14 @@ class CarEnv(gym.Env):
         try:
             theta = math.acos(np.vdot(B-A, B-C) / np.linalg.norm(B-A) * np.linalg.norm(B-C))
         except ValueError:
-            print(f"{A=}\t{B=}\t{C=}")
+            # print(f"{A=}\t{B=}\t{C=}")
             theta = 0
         theta_deg = math.degrees(theta)
         # print(f"{math.degrees(theta)=:.1f}")
-        if theta_deg > 100:
+        if theta_deg > 110:
             # print(f"Road curving left \t{theta_deg=:.1f}")
             return 1
-        elif theta_deg < 80:
+        elif theta_deg < 70:
             # print(f"Road curving right \t{theta_deg=:.1f}")
             return 2
         else:
@@ -688,15 +738,14 @@ class CarEnv(gym.Env):
             # print(f"RIGHT, {dist=:.1f} {d=:.1f}")
             return 2
 
-
     def dist_from_line(self, centerline, point):
-        a = [[x[0],x[1]] for x in centerline[:-1]]
-        b = [[x[0],x[1]] for x in centerline[1:]]
-        a = np.array(a)
-        b = np.array(b)
-        dist = self.lineseg_dists([point[0], point[1]], a, b)
+        a = [x[0:2] for x in centerline[:-1]]
+        b = [x[0:2] for x in centerline[1:]]
+        # a = np.array(a)
+        # b = np.array(b)
+        # print(f"{a.shape=}\t{b.shape=}")
+        dist = self.lineseg_dists(point[0:2], np.array(a), np.array(b))
         return dist
-
 
     def lineseg_dists(self, p, a, b):
         """Cartesian distance from point to line segment
@@ -796,3 +845,148 @@ class CarEnv(gym.Env):
 
         if save:
             plt.savefig(f"{title}-training_performance.jpg")
+
+    def add_qr_cubes(self, scenario, qrbox_filename='posefiles/qr_box_locations.txt'):
+        global qr_positions
+        qr_positions = []
+        with open(qrbox_filename, 'r') as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.split(' ')
+                pos = line[0].split(',')
+                pos = tuple([float(i) for i in pos])
+                rot_quat = line[1].split(',')
+                rot_quat = tuple([float(j) for j in rot_quat])
+                qr_positions.append([copy.deepcopy(pos), copy.deepcopy(rot_quat)])
+                box = ScenarioObject(oid='qrbox_{}'.format(i), name='qrbox2', otype='BeamNGVehicle', pos=pos, rot=None,
+                                     rot_quat=rot_quat, scale=(1, 1, 1), JBeam='qrbox2', datablock="default_vehicle")
+                scenario.add_object(box)
+
+    # with warp
+    def overlay_transparent(self, img1, img2, corners):
+        import kornia
+        print(f"{img1.shape=}") # img1.shape=(135, 240, 3)
+        print(f"{img2.shape=}") # img2.shape=(1, 1)
+        orig = torch.from_numpy(img1[None]).permute(0, 3, 1, 2) / 255.0
+        pert = torch.from_numpy(img2).permute(0, 3, 1, 2) / 255.0 # determined by observation space high and low
+
+        _, c, h, w = _, *pert_shape = pert.shape
+        _, *orig_shape = orig.shape
+        patch_coords = corners[None]
+        src_coords = np.tile(
+            np.array(
+                [
+                    [
+                        [0.0, 0.0],
+                        [w - 1.0, 0.0],
+                        [0.0, h - 1.0],
+                        [w - 1.0, h - 1.0],
+                    ]
+                ]
+            ),
+            (len(patch_coords), 1, 1),
+        )
+        src_coords = torch.from_numpy(src_coords).float()
+        patch_coords = torch.from_numpy(patch_coords).float()
+
+        # build the transforms to and from image patches
+        try:
+            perspective_transforms = kornia.geometry.transform.get_perspective_transform(src_coords, patch_coords)
+        except Exception as e:
+            print(f"{e=}")
+            print(f"{src_coords=}")
+            print(f"{patch_coords=}")
+
+        perturbation_warp = kornia.geometry.transform.warp_perspective(
+            pert,
+            perspective_transforms,
+            dsize=orig_shape[1:],
+            mode="nearest",
+            align_corners=True
+        )
+        mask_patch = torch.ones(1, *pert_shape)
+        warp_masks = kornia.geometry.transform.warp_perspective(
+            mask_patch, perspective_transforms, dsize=orig_shape[1:],
+            mode="nearest",
+            align_corners=True
+        )
+        perturbed_img = orig * (1 - warp_masks)
+        perturbed_img += perturbation_warp * warp_masks
+        return (perturbed_img.permute(0, 2, 3, 1).numpy()[0] * 255).astype(np.uint8)
+
+    # uses contour detection
+    # @ignore_warnings
+    def get_qr_corners_from_colorseg_image(self, image):
+        from skimage import util
+        image = np.array(image)
+        # cv2.imshow('colorseg', image)
+        # cv2.waitKey(1)
+        # hsv mask image
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        light_color = (50, 230, 0)  # (50, 235, 235) #(0, 200, 0)
+        dark_color = (90, 256, 256)  # (70, 256, 256) #(169, 256, 256)
+        mask = cv2.inRange(hsv_image, light_color, dark_color)
+        image = cv2.bitwise_and(image, image, mask=mask)
+
+        # convert image to inverted greyscale
+        R, G, B = image[:, :, 0], image[:, :, 1], image[:, :, 2]
+        imgGray = 0.2989 * R + 0.5870 * G + 0.1140 * B
+        inverted_img = util.invert(imgGray)
+        inverted_img = np.uint8(inverted_img)
+        inverted_img = 255 - inverted_img
+        inverted_img = cv2.GaussianBlur(inverted_img, (3, 3), 0)  # 9
+
+        # contour detection
+        ret, thresh = cv2.threshold(inverted_img, 150, 255, cv2.THRESH_BINARY)
+        contours, hierarchy = cv2.findContours(image=thresh, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours == [] or np.array(contours).shape[0] < 2:
+            return [[[0, 0], [0, 0], [0, 0], [0, 0]]], None
+        else:
+            epsilon = 0.1 * cv2.arcLength(np.float32(contours[1]), True)
+            approx = cv2.approxPolyDP(np.float32(contours[1]), epsilon, True)
+
+            contours = np.array([c[0] for c in contours[1]])
+            approx = [c[0] for c in approx]
+            # contours = contours.reshape((contours.shape[0], 2))
+            if len(approx) < 4:
+                return [[[0, 0], [0, 0], [0, 0], [0, 0]]], None
+
+            def sortClockwise(approx):
+                xs = [a[0] for a in approx]
+                ys = [a[1] for a in approx]
+                center = [int(sum(xs) / len(xs)), int(sum(ys) / len(ys))]
+
+                def sortFxnX(e):
+                    return e[0]
+
+                def sortFxnY(e):
+                    return e[1]
+
+                approx = list(approx)
+                approx.sort(key=sortFxnX)
+                midpt = int(len(approx) / 2)
+                leftedge = list(approx[:midpt])
+                rightedge = list(approx[midpt:])
+                leftedge.sort(key=sortFxnY)
+                rightedge.sort(key=sortFxnY)
+                approx = [leftedge[0], leftedge[1], rightedge[1], rightedge[0]]
+                return approx, leftedge, rightedge, center
+
+            approx, le, re, center = sortClockwise(approx)
+            for i, c in enumerate(le):
+                cv2.circle(image, tuple([int(x) for x in c]), radius=1, color=(100 + i * 20, 0, 0), thickness=2)  # blue
+            for i, c in enumerate(re):
+                cv2.circle(image, tuple([int(x) for x in c]), radius=1, color=(0, 0, 100 + i * 20), thickness=2)  # blue
+            cv2.circle(image, tuple(center), radius=1, color=(203, 192, 255), thickness=2)  # lite pink
+            if len(approx) > 3:
+                cv2.circle(image, tuple([int(x) for x in approx[0]]), radius=1, color=(0, 255, 0), thickness=2)  # green
+                cv2.circle(image, tuple([int(x) for x in approx[2]]), radius=1, color=(0, 0, 255), thickness=2)  # red
+                cv2.circle(image, tuple([int(x) for x in approx[3]]), radius=1, color=(255, 255, 255),
+                           thickness=2)  # white
+                cv2.circle(image, tuple([int(x) for x in approx[1]]), radius=1, color=(147, 20, 255),
+                           thickness=2)  # pink
+
+            keypoints = [[tuple(approx[0]), tuple(approx[3]),
+                          tuple(approx[1]), tuple(approx[2])]]
+            return keypoints, image

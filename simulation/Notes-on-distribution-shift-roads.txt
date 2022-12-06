@@ -952,3 +952,20 @@ west_coast_usa near road_id 12146 not reversed
 Plotting nearby roads to point=(-391.0, -798.8, 139.7)
 
 west_coast_usa
+
+
+PERFECT RUN STATS
+SUMMARY OF EPISODE #1
+	total distance travelled:1682.6003063432665
+	total reward:-65.32237990901629
+	avg dist from centerline:0.8422756628845686
+SUMMARY OF EPISODE #1
+	total distance travelled:1682.4305951308809
+	total reward:56338.37222571296
+	avg dist from centerline:0.8385216380880893
+
+BASE MODEL + PERFECT HUMAN DRIVER/EVALUATOR RUNS
+SUMMARY OF EPISODE #1
+	total distance travelled:1683.688047545402
+	total reward:10830.964503692441
+	avg dist from centerline:1.6307294662113814
