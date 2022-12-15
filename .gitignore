@@ -8,4 +8,4 @@ CrashNet*
 track-traces/
 simulation/RLtrain-*
 simulation/RLtest*
-simulation/tb*
+simulation/results*

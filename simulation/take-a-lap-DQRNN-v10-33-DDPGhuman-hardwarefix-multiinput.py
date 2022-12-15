@@ -124,20 +124,20 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-DDPGhuman-halfres-zeronoise-everystep-{timestr}-{randstr}"
+    newdir = f"RLtrain-DDPGhuman-halfres-everystep-multiinput-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
-        shutil.copy(f"{os.getcwd()}/DDPGHumanenv2.py", newdir)
-    PATH = f"{newdir}/rew2to4minusdist"
+        shutil.copy(f"{os.getcwd()}/DDPGHumanenv3.py", newdir)
+    PATH = f"{newdir}/evalrew"
 
-    from DDPGHumanenv2 import CarEnv
+    from DDPGHumanenv3 import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.researchINSTANCE3",
+    env = CarEnv(image_shape=(2, 3, 135, 240), model="DDPGMLPMulti", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.research",
                  # port=64156, scenario="west_coast_usa", road_id="12146", reverse=False, # outskirts with bus stop
                  # port=64356, scenario="automation_test_track", road_id="8185", reverse=False,
                  # port=64356, scenario="west_coast_usa", road_id="10784", reverse=False,
-                 port=64756, scenario="hirochi_raceway", road_id="9039", reverse=False,
+                 port=64156, scenario="hirochi_raceway", road_id="9039", reverse=False,
                  # port=64156, scenario="west_coast_usa", road_id="10673", reverse=False,
                  # port=64156, scenario="west_coast_usa", road_id="12930", reverse=False,
                  base_model=model_filename, test_model=False)
@@ -152,15 +152,15 @@ def main():
     n_actions = env.action_space.shape[-1]
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.0001 * np.ones(n_actions))
     model = DDPG(
-        "CnnPolicy",
+        "MlpPolicy",
         env,
         action_noise=action_noise,
-        learning_rate=0.00001,
+        learning_rate=0.0005,
         verbose=1,
         batch_size=32,
         train_freq=1,
         learning_starts=2000000,
-        buffer_size=50000,
+        buffer_size=5000,
         device="cuda",
         tensorboard_log=f"./{newdir}/tb_logs_DDPG/",
     )

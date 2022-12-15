@@ -132,11 +132,13 @@ class CarEnv(gym.Env):
         freecams['eagles_eye_cam']["colour"].convert('RGB').save(f"eagles-eye-view-{self.default_scenario}-{self.road_id}.jpg", "JPEG")
         assert self.vehicle.skt
         ###########################################################################
-        self.observation_space = spaces.Box(0, 255, shape=image_shape, dtype=np.uint8)
+        self.observation_space = spaces.Box(0, 255, shape=self.image_shape, dtype=np.uint8)
         self.viewer = None
 
         self.start_ts = 0
         self.state = {
+            "image": np.zeros(image_shape[1:]),
+            "prev_image": np.zeros(image_shape[1:]),
             "pose": np.zeros(3),
             "prev_pose": np.zeros(3),
             "collision": False,
@@ -152,15 +154,30 @@ class CarEnv(gym.Env):
         sensors = self.bng.poll_sensors(self.vehicle)
         self.current_trajectory.append(self.vehicle.state["pos"])
         # responses = self.car.simGetImages([self.image_request])
-        self.car_state = sensors #self.getCarState(sensors)
+        self.car_state = sensors
         self.state["pose"] = self.vehicle.state["pos"]
+        kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
         self.state["collision"] = sensors["damage"]["damage"] > 0
         image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
-        if self.image_shape[0] == 1:
+        image = cv2.resize(image, (self.image_shape[3], self.image_shape[2]))
+        if self.image_shape[1] == 1:
             image = self.rgb2gray(image)
-        image = image.reshape(self.image_shape)
-        return image
+        image = image.reshape(self.image_shape[1:])
+        self.state["prev_image"] = self.state["image"]
+        self.state["image"] = image
+        # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
+        # expert_action, cartocl_theta_deg = self.get_expert_action(outside_track, distance_from_center,
+        #                                                           leftrightcenter, segment_shape, theta_deg)
+        # evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape)
+        # return {"image1": image, "image2": self.state["prev_image"], "kph": kph}
+        combo = np.zeros((self.image_shape))
+        combo[0] = image
+        combo[1] = self.state["prev_image"]
+        # print(f"{combo.shape=}")
+        if self.episode_steps == 0:
+            return np.zeros(self.image_shape)
+        else:
+            return combo
 
     def rgb2gray(self, rgb):
         r, g, b = rgb[:,:,0], rgb[:,:,1], rgb[:,:,2]
@@ -169,13 +186,12 @@ class CarEnv(gym.Env):
 
     def step(self, action):
         if self.test_model:
-            sensors = self.bng.poll_sensors(self.vehicle)
-            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
-            dt = (sensors['timer']['time'] - self.start_time) - self.runtime
-            self.runtime = sensors['timer']['time'] - self.start_time
-            throttle = self.throttle_PID(kph, dt)
-            image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-            image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
+            obs = self._get_obs()
+            kph = self.ms_to_kph(self.car_state['electrics']['wheelspeed'])
+            dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
+            self.runtime = self.car_state['timer']['time'] - self.start_time
+            image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            image = cv2.resize(image, (self.image_shape[3], self.image_shape[2]))
             img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             cv2.imshow("true image", img)
             cv2.waitKey(1)
@@ -184,31 +200,26 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-            print(f"DDPG action={action.item():.3f} \t basemodel steer={self.base_model_inf[-1]:.3f} ")
-            # certainty = (action[0][0] + 1.0) / 2
-            # print(f"certainty={round(certainty, 1)} \t basemodel steer={self.base_model_inf[-1]:.3f} \t DDPG steer={action[0][1]:.3f}")
-            # if round(certainty, 1) >= 0.5: # high certainty, use model steer
-            #     steer = base_model_inf
-            #     blackedout = np.zeros(image.shape)
-            #     cv2.imshow("action image", blackedout)
-            #     cv2.waitKey(1)
-            # else: # use DDPG action
-            if True:
-                steer = float(action.item())
-                self.frames_adjusted += 1
+            if abs(action.item() - base_model_inf) < 0.005:
+                taken_action = base_model_inf
+                blackedout = np.zeros(image.shape)
+                cv2.imshow("action image", blackedout)
+                cv2.waitKey(1)
+            else:
+                taken_action = action.item()
                 blackedout = np.ones(image.shape)
                 blackedout[:,:,:2] = blackedout[:,:,:2] * 0 # RED
                 cv2.imshow("action image", blackedout)
                 cv2.waitKey(1)
+                self.frames_adjusted += 1
 
-            if abs(steer) > 0.175:
+            if abs(taken_action) > 0.15:
                 self.setpoint = 30
             else:
                 self.setpoint = 40
-
-            self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
+            throttle = self.throttle_PID(kph, dt)
+            self.vehicle.control(throttle=throttle, steering=taken_action, brake=0.0)
             self.bng.step(1, wait=True)
-            obs = self._get_obs()
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             # reward = self.calc_reward(action, expert_action, self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape))
             reward = 0
@@ -221,15 +232,13 @@ class CarEnv(gym.Env):
             return obs, reward, done, self.state
 
         else:
-            sensors = self.bng.poll_sensors(self.vehicle)
-            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
-            dt = (sensors['timer']['time'] - self.start_time) - self.runtime
-            self.runtime = sensors['timer']['time'] - self.start_time
-            throttle = self.throttle_PID(kph, dt)
-            image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-            image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
-            img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            cv2.imshow("true image", img)
+            obs = self._get_obs()
+            kph = self.ms_to_kph(self.car_state['electrics']['wheelspeed'])
+            dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
+            self.runtime = self.car_state['timer']['time'] - self.start_time
+            image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            image = cv2.resize(image, (self.image_shape[3], self.image_shape[2]))
+            cv2.imshow("true image", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
 
             features = self.transform(image)[None]
@@ -239,69 +248,48 @@ class CarEnv(gym.Env):
             expert_action, cartocl_theta_deg = self.get_expert_action(outside_track, distance_from_center,
                                                                       leftrightcenter, segment_shape, theta_deg)
             evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape)
+            taken_action = None
             if evaluation == 1:
-                done = outside_track or self.state["collision"]
-                obs = self._get_obs()
-                if done:
-                    # obs = self._get_obs()
-                    # reward = math.pow(2, 4.0 - distance_from_center)
-                    if self.state["collision"]:
-                        reward = -200
-                    else:
-                        reward = 200
-                    # reward = self.calc_reward(action, expert_action, self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape))
-                    return obs, reward, done, self.state
+                taken_action = base_model_inf
+                # 93275.319|E|libbeamng.lua.V.updateGFX|Object ID: 9620
+                # 93275.320|E|libbeamng.lua.V.updateGFX|Object position: vec3(601.547,53.4482,43.29)
+                # 93275.320|E|libbeamng.lua.V.updateGFX|Object rotation: quat(-0.033713240176439,0.038085918873549,0.99870544672012,-0.00058328913291916)
 
-                if abs(base_model_inf) > 0.175:
+                # 93467.556|E|libbeamng.lua.V.updateGFX|Object ID: 9620
+                # 93467.557|E|libbeamng.lua.V.updateGFX|Object position: vec3(491.521,119.336,30.2536)
+                # 93467.557|E|libbeamng.lua.V.updateGFX|Object rotation: quat(-0.062928266823292,0.038666535168886,0.68600910902023,0.72383457422256)
+
+                if abs(base_model_inf) > 0.15:
                     self.setpoint = 30
                 else:
                     self.setpoint = 40
                 throttle = self.throttle_PID(kph, dt)
-                blackedout = np.zeros(image.shape)
-                # img = cv2.cvtColor(blackedout, cv2.COLOR_RGB2BGR)
-                cv2.imshow("action image", blackedout)
+                cv2.imshow("action image", np.zeros(image.shape)) # black
                 cv2.waitKey(1)
 
                 self.vehicle.control(throttle=throttle, steering=base_model_inf, brake=0.0)
-                self.bng.step(1, wait=True)
-                self.actions.append(action.item())
-                # self.episode_steps += 1
-
-                sensors = self.bng.poll_sensors(self.vehicle)
-                self.runtime = sensors['timer']['time'] - self.start_time
-                image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-                image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
-                features = self.transform(image)[None]
-                base_model_inf = self.base_model(features).item()
-                self.base_model_inf.append(base_model_inf)
-                outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-                # done = outside_track or self.state["collision"]
-                img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                cv2.imshow("true image", img)
-                cv2.waitKey(1)
 
             else:
+                taken_action = expert_action
                 blackedout = np.ones(image.shape)
-                blackedout[:,:,:2] = blackedout[:,:,:2] * 0 # RED
-                cv2.imshow("action image", blackedout)
+                blackedout[:,:,:2] = blackedout[:,:,:2] * 0
+                cv2.imshow("action image", blackedout) # red
                 cv2.waitKey(1)
-                if abs(expert_action) > 0.175:
+                if abs(expert_action) > 0.15:
                     self.setpoint = 30
                 else:
                     self.setpoint = 40
 
                 throttle = self.throttle_PID(kph, dt)
                 self.vehicle.control(throttle=throttle, steering=expert_action, brake=0.0)
-                self.bng.step(1, wait=True)
-                obs = self._get_obs()
                 self.frames_adjusted += 1
 
+            self.bng.step(1, wait=True)
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape)
-            reward = self.calc_reward(action, expert_action, evaluation)
-            # reward = math.pow(2, 4 - distance_from_center)
+            reward = self.calc_reward(action, taken_action, evaluation)
             self.episode_steps += 1
-            done = outside_track or self.state["collision"]
+            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], [601.547,53.4482,43.29]) < 20)
             self.current_rewards.append(reward)
             # print(f"STEP() \n\troad_seg {theta_deg=:.1f}\t car-to-CL theta_deg={cartocl_theta_deg:.1f}\n\texpert_action={expert_action:.3f}\t\t{base_model_inf=:.3f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
             return obs, reward, done, self.state
@@ -315,6 +303,8 @@ class CarEnv(gym.Env):
         # else:
         #     reward -= 50
         # print(f"{action=} \t conf={round(conf, 0)} \t {evaluation=} \t conf. reward={reward} \t action reward={-(abs(expert_action - action[0][1])*100):.3f}")
+        # reward -= (abs(expert_action - action[0][1])*100)
+        # print(f"{action=} \t {reward=}")
         if round(abs(expert_action - action.item()), 3) < 0.005:
             reward += 100
         else:
@@ -360,17 +350,20 @@ class CarEnv(gym.Env):
         self.total_loops, self.total_imgs, self.total_predictions = 0, 0, 0
         self.start_time = sensors['timer']['time']
         self.image = np.array(sensors['front_cam']['colour'].convert('RGB'))
-        self.image = cv2.resize(self.image, (self.image_shape[2], self.image_shape[1]))
+        self.image = cv2.resize(self.image, (self.image_shape[3], self.image_shape[2]))
         # image = np.array(sensors['front_cam']['colour'].convert('RGB'))
         # self.image = self.rgb2gray(self.image).reshape(self.image_shape)
-        if self.image_shape[0] == 1:
+        # print(f"{self.image.shape=}")
+        if self.image_shape[1] == 1:
             self.image = self.rgb2gray(self.image)
-        self.image = self.image.reshape(self.image_shape)
+        self.image = self.image.reshape(self.image_shape[1:])
         self.outside_track = False
         self.done = False
         self.states, self.actions, self.probs, self.rewards, self.critic_values = [], [], [], [], []
         self.traj = []
-        return self._get_obs()
+        obs = self._get_obs()
+        # print(f"reset {obs.shape=}")
+        return obs
 
     # def render(self):
     #     return self._get_obs()
@@ -506,9 +499,9 @@ class CarEnv(gym.Env):
         camera_pos = (-0.5, 0.38, 1.3)
         camera_dir = (0, 1.0, 0)
         fov = 51 # 60 works for full lap #63 breaks on hairpin turn
-        width = int(self.image_shape[2] / 2)
-        height = int(self.image_shape[1] / 2)
-        resolution = (width, height) #(self.image_shape[2], self.image_shape[1])  # (400,225) #(320, 180) #(1280,960) #(512, 512)
+        width = int(self.image_shape[3] / 2)
+        height = int(self.image_shape[2] / 2)
+        resolution = (width, height)
         front_camera = Camera(camera_pos, camera_dir, fov, resolution,
                               colour=True, depth=True, annotation=True)
         gforces = GForces()
@@ -1047,7 +1040,6 @@ class CarEnv(gym.Env):
 
             contours = np.array([c[0] for c in contours[1]])
             approx = [c[0] for c in approx]
-            # contours = contours.reshape((contours.shape[0], 2))
             if len(approx) < 4:
                 return [[[0, 0], [0, 0], [0, 0], [0, 0]]], None
 
