@@ -57,29 +57,22 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtest-DDPGhuman-halfres-{timestr}-{randstr}"
+    newdir = f"RLtest-DDPG-tinyimg-0.05eps-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
-        shutil.copy(f"{os.getcwd()}/beamng_env.py", newdir)
-    PATH = f"{newdir}/rew2to4minusdist"
+        shutil.copy(f"{os.getcwd()}/TestEnv.py", newdir)
+    PATH = f"{newdir}/"
 
-    from DDPGHumanenv4 import CarEnv
+    from TestEnv import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.researchINSTANCE4",
-                 # port=64156, scenario="west_coast_usa", road_id="12146", reverse=False, # outskirts with bus stop
-                 # port=64356, scenario="automation_test_track", road_id="8185", reverse=False,
-                 # port=64356, scenario="west_coast_usa", road_id="10784", reverse=False,
-                 port=64756, scenario="hirochi_raceway", road_id="9039", reverse=False,
-                 # port=64156, scenario="west_coast_usa", road_id="10673", reverse=False,
-                 # port=64156, scenario="west_coast_usa", road_id="12930", reverse=False,
-                 base_model=model_filename, test_model=True)
+    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
+                 beamnginstance="BeamNG.researchINSTANCE4", port=64756, scenario="hirochi_raceway", road_id="9039", reverse=False,
+                 base_model=model_filename, test_model=False)
     start_time = time.time()
     from stable_baselines3 import DDPG
 
-    # model = DDPG.load("RLtrain-DDPGhuman-11_8-20_7-8TWTKR/best_model")
-    model = DDPG.load("DIDIFIXIT-RLtrain-DDPGhuman-halfres-everystep-singleinput-EVALEXPERT-12_14-13_14-GVL77O/best_model", print_system_info=True)
-    # model = DDPG.load("RLtrain-DDPGhuman-fov70-11_16-15_17-XMF1Y8/best_model", print_system_info=True)
+    model = DDPG.load("RLtrain-max200epi-DDPGhuman-0.05evaleps-tinyimg-1_11-15_39-FWYY3Q/best_model", print_system_info=True)
 
     # test model loaded properly
     # testinput = np.random.random((1, 84, 150))
@@ -89,6 +82,7 @@ def main():
     obs = env.reset()
     episode_reward = 0
     done, crashed = False, False
+    episodes = 0
     while not done or not crashed:
         action, _ = model.predict(obs, deterministic=False)
         # print(action)
@@ -98,6 +92,9 @@ def main():
             print("Done?", done, "Collision?", state.get('collision', True))
             episode_reward = 0.0
             obs = env.reset()
+            episodes += 1
+        if episodes == 10:
+            break
         # env.render()
 
 

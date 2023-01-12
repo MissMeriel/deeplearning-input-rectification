@@ -60,9 +60,9 @@ class CarEnv(gym.Env):
                  beamnginstance="BeamNG.research", port=64356, road_id="12146", reverse=False):
         super(CarEnv, self).__init__()
         self.beamngpath = beamngpath
-        # self.default_scenario = 'hirochi_raceway'
+        self.default_scenario = 'hirochi_raceway'
         # self.road_id = "9039"
-        self.default_scenario = "west_coast_usa"
+        # self.default_scenario = "west_coast_usa"
         self.road_id = road_id
         self.reverse = reverse
         self.integral = 0.0
@@ -180,7 +180,9 @@ class CarEnv(gym.Env):
         self.state["pose"] = self.vehicle.state["pos"]
         self.state["collision"] = sensors["damage"]["damage"] > 0
         image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        image = self.rgb2gray(image).reshape(self.image_shape)
+        if self.image_shape[0] == 1:
+            image = self.rgb2gray(image)
+        image = image.reshape(self.image_shape)
         return image
 
     def rgb2gray(self, rgb):
@@ -227,7 +229,9 @@ class CarEnv(gym.Env):
         self.start_time = sensors['timer']['time']
         self.image = np.array(sensors['front_cam']['colour'].convert('RGB'))
         # image = np.array(sensors['front_cam']['colour'].convert('RGB'))
-        self.image = self.rgb2gray(self.image).reshape(self.image_shape)
+        if self.image_shape[0] == 1:
+            self.image = self.rgb2gray(self.image) #.reshape(self.image_shape)
+        image = self.image.reshape(self.image_shape)
         self.outside_track = False
         self.done = False
         self.action_inputs = [-1, 0, 1]

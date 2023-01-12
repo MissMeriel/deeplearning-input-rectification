@@ -50,7 +50,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"DIDIFIXIT-RLtrain-DDPGonpolicy-halfres-everystep-singleinput-distrew-{timestr}-{randstr}"
+    newdir = f"RLtrain-DDPGonpolicy-halfres-everystep-singleinput-distrew-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -73,7 +73,7 @@ def main():
     from stable_baselines3.common.noise import NormalActionNoise
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.0005 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0. * np.ones(n_actions))
     model = DDPG(
         "MlpPolicy",
         env,
@@ -88,13 +88,14 @@ def main():
         tensorboard_log=f"./{newdir}/tb_logs_DDPG/",
     )
     # Create an evaluation callback with the same env, called every 10000 iterations
-    from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
+    from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement, StopTrainingOnMaxEpisodes
     stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=10, min_evals=50, verbose=1)
+    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=200, verbose=1)
     callbacks = []
     eval_callback = EvalCallback(
         env,
         callback_on_new_best=None,
-        callback_after_eval=stop_train_callback,
+        #callback_after_eval=stop_train_callback,
         n_eval_episodes=5,
         best_model_save_path=f"./{newdir}",
         log_path=f"./{newdir}",
@@ -102,7 +103,7 @@ def main():
         verbose=1
     )
     callbacks.append(eval_callback)
-
+    callbacks.append(callback_max_episodes)
     kwargs = {}
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps

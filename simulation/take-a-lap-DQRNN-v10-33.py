@@ -29,7 +29,7 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnMaxEpisodes
 
 '''
 Actor-Critic Learner with continuous action space
@@ -53,7 +53,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-v1033badmodel-{timestr}-{randstr}"
+    newdir = f"RLtrain-v1033badmodel-rerun200eps-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -61,14 +61,14 @@ def main():
     PATH = f"{newdir}/SB3-v1033badmodel-DQN6action-rew5000"
     import gym
     from beamng_env import CarEnv
-    env = CarEnv(image_shape=(1, 84, 150), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.research",
+    env = CarEnv(image_shape=(3, 135, 240), model="DQN", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.researchINSTANCE2",
                  # port=64156, road_id="12146", reverse=False)
                  # port=64156, road_id="12667", reverse=False)
                  # port=64156, road_id="10784", reverse=False)
                  # port=64156, road_id="10673", reverse=False)
-                 port=64156, road_id="12930", reverse=False)
+                 port=64356, road_id="9039", reverse=False)
     from stable_baselines3.common.env_checker import check_env
-    check_env(env)
+    # check_env(env)
     start_time = time.time()
 
     # Initialize RL algorithm type and parameters
@@ -88,7 +88,7 @@ def main():
         device="cuda",
         tensorboard_log=f"./{newdir}/tb_logs_v1033-badmodel/",
     )
-    model.load("./RLtrain-v1033badmodel-10_21-15_16-KI77DT/best_model")
+    # model.load("./RLtrain-v1033badmodel-10_21-15_16-KI77DT/best_model")
     # Create an evaluation callback with the same env, called every 10000 iterations
     callbacks = []
     eval_callback = EvalCallback(
@@ -100,7 +100,8 @@ def main():
         eval_freq=10000,
     )
     callbacks.append(eval_callback)
-
+    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=200, verbose=1)
+    callbacks.append(callback_max_episodes)
     kwargs = {}
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps
