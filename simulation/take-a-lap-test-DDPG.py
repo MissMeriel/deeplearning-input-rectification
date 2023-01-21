@@ -57,7 +57,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtest-DDPG-tinyimg-0.05eps-{timestr}-{randstr}"
+    newdir = f"CAMtest-depth60100-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -67,13 +67,13 @@ def main():
     from TestEnv import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
-                 beamnginstance="BeamNG.researchINSTANCE4", port=64756, scenario="hirochi_raceway", road_id="9039", reverse=False,
-                 base_model=model_filename, test_model=False)
+                 beamnginstance="BeamNG.researchINSTANCE4", port=64956, scenario="hirochi_raceway", road_id="9039", reverse=False,
+                 base_model=model_filename, test_model=True, seg=0)
     start_time = time.time()
     from stable_baselines3 import DDPG
 
-    model = DDPG.load("RLtrain-max200epi-DDPGhuman-0.05evaleps-tinyimg-1_11-15_39-FWYY3Q/best_model", print_system_info=True)
-
+    # model = DDPG.load("RLtrain-max200epi-DDPGhuman-0.05evaleps-bigimg-1_19-20_43-IW6ZTT/best_model", print_system_info=True)
+    model = DDPG.load("F:\old-RRL-results\RLtrain-max200epi-DDPGhuman-0.05evaleps-tinyimg-1_18-16_40-YQPJKY/best_model", print_system_info=True)
     # test model loaded properly
     # testinput = np.random.random((1, 84, 150))
     # pred = model.predict(testinput)
@@ -83,6 +83,7 @@ def main():
     episode_reward = 0
     done, crashed = False, False
     episodes = 0
+    results = []
     while not done or not crashed:
         action, _ = model.predict(obs, deterministic=False)
         # print(action)
@@ -90,12 +91,26 @@ def main():
         crashed = state.get('collision', True)
         if done or crashed:
             print("Done?", done, "Collision?", state.get('collision', True))
-            episode_reward = 0.0
+            ep_results = env.get_progress()
+            results.append(ep_results)
             obs = env.reset()
             episodes += 1
-        if episodes == 10:
+        if episodes == 5:
+            env.close()
             break
         # env.render()
+    dists = []
+    centerline_dists = []
+    ep_count, frames_adjusted = 0, 0
+    for r in results:
+        dists.append(r['dist_travelled'])
+        centerline_dists.extend(r['dist_from_centerline'])
+        ep_count += r["total_steps"]
+        frames_adjusted += r["frames_adjusted_count"]
+    print(f"AVERAGE OVER {episodes} RUNS:"
+          f"\n\tdist travelled:{sum(dists) / len(dists):1f}"
+          f"\n\tdist from ctrline:{np.std(centerline_dists):3f}"
+          f"\n\tintervention rate:{frames_adjusted / ep_count:3f}")
 
 
 if __name__ == '__main__':

@@ -22,35 +22,6 @@ def gaussian_blur(sharp_image, sigma):
     return blurred_image
 
 
-def uniform_blur(sharp_image, uniform_filter_size):
-    # The multidimensional filter is required to avoid gray scale images
-    multidim_filter_size = (uniform_filter_size, uniform_filter_size, 1)
-    blurred_image = scipy.ndimage.filters.uniform_filter(sharp_image, size=multidim_filter_size)
-    return blurred_image
-
-
-def blur_image_locally(sharp_image, mask, use_gaussian_blur, gaussian_sigma, uniform_filter_size):
-    one_values_f32 = np.full(sharp_image.shape, fill_value=1.0, dtype=np.float32)
-    sharp_image_f32 = sharp_image.astype(dtype=np.float32)
-    sharp_mask_f32 = mask.astype(dtype=np.float32)
-
-    # if use_gaussian_blur:
-    #     blurred_image_f32 = gaussian_blur(sharp_image_f32, sigma=gaussian_sigma)
-    #     blurred_mask_f32 = gaussian_blur(sharp_mask_f32, sigma=gaussian_sigma)
-    #
-    # else:
-    #     blurred_image_f32 = uniform_blur(sharp_image_f32, uniform_filter_size)
-    #     blurred_mask_f32 = uniform_blur(sharp_mask_f32, uniform_filter_size)
-
-    blurred_mask_inverted_f32 = one_values_f32 - blurred_mask_f32
-    weighted_sharp_image = np.multiply(sharp_image_f32, blurred_mask_f32)
-    weighted_blurred_image = np.multiply(blurred_image_f32, blurred_mask_inverted_f32)
-    locally_blurred_image_f32 = weighted_sharp_image + weighted_blurred_image
-
-    locally_blurred_image = locally_blurred_image_f32.astype(dtype=np.uint8)
-
-    return locally_blurred_image
-
 def test_artifical_depth_estimation_broken():
     parent = "CAMtest-depth60100-1_16-12_53-154T84"
     img_orig = Image.open("/".join([parent,"imgmain-epi001-step0000.jpg"]))
@@ -115,6 +86,87 @@ def test_depth_of_field_transformation():
     img_orig[idx] = img_blur[idx]
     im = Image.fromarray(img_orig)
     im.save("test_depth_of_field_transformation-nearfar.jpeg")
+
+def test_depth_of_field_standalone():
+    parent = "F:/old-RRL-results/CAMtest-depth50100-1_16-12_33-8L3IHC"
+    img_orig_pil = Image.open("/".join([parent,"imgmain-epi001-step0000.jpg"]))
+    img_orig = np.array(img_orig_pil, dtype=np.uint8)
+    result = dpt_prediction(img_orig)
+
+def test_depth_of_field_inv():
+    from torchvision.transforms import functional as F
+    import torch
+    from torch import Tensor
+    parent = "F:/old-RRL-results/CAMtest-depth50100-1_16-12_33-8L3IHC"
+    img_orig_pil = Image.open("/".join([parent,"imgmain-epi001-step0000.jpg"]))
+    img_orig = np.array(img_orig_pil, dtype=np.uint8)
+    result = dpt_prediction(img_orig)
+    img_torch = Tensor(img_orig)
+    img_torch = torch.permute(img_torch, (2, 0, 1))
+    # sharpness_factor (float) – How much to adjust the sharpness.
+    # Can be any non negative number.
+    # 0 gives a blurred image, 1 gives the original image while 2 increases the sharpness by a factor of 2.
+    sharp_img = F.adjust_sharpness(img_torch, 1.5)
+
+
+def dpt_prediction(img):
+    import torch
+    from dpt.models import DPTDepthModel
+    from dpt.transforms import Resize, NormalizeImage, PrepareForNet
+    from torchvision.transforms import Compose
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    net_w = net_h = 384
+    model = DPTDepthModel(
+        path="C:/Users/Meriel/Documents/GitHub/DPT/weights/dpt_hybrid-midas-501f0c75.pt",
+        backbone="vitb_rn50_384",
+        non_negative=True,
+        enable_attention_hooks=False,
+    )
+    normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    transform = Compose(
+        [
+            Resize(
+                net_w,
+                net_h,
+                resize_target=None,
+                keep_aspect_ratio=True,
+                ensure_multiple_of=32,
+                resize_method="minimal",
+                image_interpolation_method=cv2.INTER_CUBIC,
+            ),
+            normalization,
+            PrepareForNet(),
+        ]
+    )
+
+    model.eval()
+
+    model.to(device)
+
+    img_input = transform({"image": img})["image"]
+
+    # compute
+    with torch.no_grad():
+        sample = torch.from_numpy(img_input).to(device).unsqueeze(0)
+
+        prediction = model.forward(sample)
+        prediction = (
+            torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=img.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            )
+                .squeeze()
+                .cpu()
+                .numpy()
+        )
+    print(type(prediction))
+    print(prediction.shape)
+    plt.imshow(prediction)
+    plt.show()
+    return prediction
 
 def test_resolution_increase():
     filepath = ""
@@ -312,7 +364,7 @@ def fisheye_wand(image, filename):
         return np.array(img)
 
 def test_pinhole_to_fisheye():
-    parent = "CAMtest-depth60100-1_16-12_53-154T84"
+    parent = "F:/old-RRL-results/CAMtest-depth60100-1_16-12_53-154T84"
     sharp_image = np.array(Image.open("/".join([parent, "imgmain-epi001-step0000.jpg"])))
     # result = fish_eye(sharp_image)
     # result = distort_to_fisheye(sharp_image)
@@ -356,6 +408,8 @@ def test_artifical_depth_estimation():
 
 if __name__ == '__main__':
     # test_artifical_depth_estimation()
+    # test_depth_of_field_standalone()
+    test_depth_of_field_inv()
     # test_depth_of_field_transformation()
     # # test_resolution_increase()
-    test_pinhole_to_fisheye()
+    # test_pinhole_to_fisheye()

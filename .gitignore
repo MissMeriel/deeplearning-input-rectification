@@ -1,3 +1,4 @@
+.gitignore
 .idea/
 *.jpg
 .venv-rect
@@ -9,3 +10,9 @@ track-traces/
 simulation/RLtrain-*
 simulation/RLtest*
 simulation/results*
+simulation/images
+simulation\agent_test_runs
+simulation/agent_test_runs
+simulation/agent_test_runs/*
+simulation/agent_test_runs/*/*
+simulation/west_coast_usa-roads400-expanded.png

@@ -50,7 +50,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-max200epi-DDPGhuman-0.05evaleps-tinyimg-{timestr}-{randstr}"
+    newdir = f"RLtrain-max200epi-DDPGhuman-0.05evaleps-bigimg-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -59,9 +59,9 @@ def main():
 
     from DDPGHumanenv4 import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
+    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 270, 480), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance="BeamNG.research", port=64156, scenario="hirochi_raceway", road_id="9039", reverse=False,
-                 base_model=model_filename, test_model=False)
+                 base_model=model_filename, test_model=False, seg=0)
 
     start_time = time.time()
     from stable_baselines3 import DDPG

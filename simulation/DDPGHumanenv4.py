@@ -61,8 +61,9 @@ class CarEnv(gym.Env):
 
     def __init__(self, image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DQN", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
                  beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
-                 base_model=None, test_model=False):
+                 base_model=None, test_model=False, seg=None):
         super(CarEnv, self).__init__()
+        self.seg = seg
         self.test_model = test_model
         self.action_space = spaces.Box(low=-2, high=2, shape=(1,1), dtype=np.float32)
         self.transform = T.Compose([T.ToTensor()])
@@ -176,9 +177,10 @@ class CarEnv(gym.Env):
         return np.array(gray, dtype=np.uint8)
 
     def step(self, action):
-        # (601.547,53.4482,43.29) quat(-0.033713240176439,0.038085918873549,0.99870544672012,-0.00058328913291916)
-        # (491.521,119.336,30.25) quat(-0.062928266823292,0.038666535168886,0.68600910902023,0.72383457422256)
-        cutoff_point = [601.547, 53.4482, 43.29]
+        if self.seg == 0:
+            cutoff_point = [368.466,-206.154,43.8237] #[412.079,-191.549,38.2418]
+        else:
+            cutoff_point = [601.547, 53.4482, 43.29]
         # cutoff_point = [401.169,-193.607,39.6045] #vec3(366.515,-206.317,43.9904)
         if self.test_model:
             sensors = self.bng.poll_sensors(self.vehicle)
@@ -266,11 +268,11 @@ class CarEnv(gym.Env):
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             reward = self.calc_reward(base_model_inf + action.item(), expert_action)
             self.episode_steps += 1
-            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 20)
+            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 12)
             if done:
                 dist = self.get_distance_traveled(self.current_trajectory)
                 if dist < 50:
-                    print(f'\nFAILED EARLY!!!!!!!\n\t{outside_track=}\n\t{self.state["collision"]=}\n\tclose to cutoff={(self.distance2D(self.state["pose"], cutoff_point) < 20)}')
+                    print(f'\nFAILED EARLY!!!!!!!\n\t{outside_track=}\n\t{self.state["collision"]=}\n\tclose to cutoff={(self.distance2D(self.state["pose"], cutoff_point) < 12)}')
                     print(self.vehicle.state)
                     print(self.car_state)
                     vehicle_pos = self.vehicle.state['front']  # self.vehicle.state['pos']
@@ -335,8 +337,13 @@ class CarEnv(gym.Env):
         self.current_rewards = []
         self.integral, self.prev_error = 0.0, 0.0
         self.bng.restart_scenario()
-        self.bng.step(1, wait=True)
-        self.vehicle.update_vehicle()
+        kph = 0
+        while kph < 35:
+            self.vehicle.update_vehicle()
+            sensors = self.bng.poll_sensors(self.vehicle)
+            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
+            self.vehicle.control(throttle=1., steering=0., brake=0.0)
+            self.bng.step(1, wait=True)
         sensors = self.bng.poll_sensors(self.vehicle)
         # spawnpoint = [290.558, -277.28, 46.0]
         # endpoint = self.actual_middle[-1]
@@ -355,6 +362,7 @@ class CarEnv(gym.Env):
         self.done = False
         self.states, self.actions, self.probs, self.rewards, self.critic_values = [], [], [], [], []
         self.traj = []
+
         return obs
 
     # bad = 0, good = 1
@@ -647,8 +655,12 @@ class CarEnv(gym.Env):
                 return {'pos':(215.912,-243.067,45.8604), 'rot': None, 'rot_quat':(0.029027424752712,0.022241719067097,0.98601061105728,0.16262225806713)}
         elif self.default_scenario == "hirochi_raceway":
             if self.road_id == "9039" or self.road_id == "9040": # good candidate for input rect.
-                #return {'pos': (292.405,-271.64,46.75), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
-                return {'pos': (290.558, -277.280, 46.0), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
+                if self.seg == 0:
+                    return {'pos': (289.327, -281.458, 46.0), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
+                else:
+                    # return {'pos': (292.405,-271.64,46.75), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
+                    return {'pos': (290.558, -277.280, 46.0), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
             elif self.road_id == "9205":
                 return {'pos': (-401.98, 243.3, 25.5), 'rot': None, 'rot_quat': (0, 0, -0.277698, 0.960669)}
             elif self.road_id == "9156":
