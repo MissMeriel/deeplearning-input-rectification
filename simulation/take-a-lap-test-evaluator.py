@@ -16,19 +16,14 @@ import csv
 from ast import literal_eval
 import PIL
 import sys
-sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/DAVE2-Keras')
-from DAVE2pytorch import DAVE2PytorchModel, DAVE2v3
-# import VAEsteer, VAE, VAEbasic
-# from VAEsteer import *
-# sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/superdeepbillboard')
-sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/BeamNGpy')
-sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/BeamNGpy/src/')
-from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
-from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
-from beamngpy import ProceduralCube
 # sys.path.append(f'{args.path2src}/GitHub/superdeepbillboard')
 # sys.path.append(f'{args.path2src}/GitHub/BeamNGpy')
 # sys.path.append(f'{args.path2src}/GitHub/BeamNGpy/src/')
+sys.path.append(f'C:/Users/Meriel/Documents/GitHub/DAVE2-Keras')
+from DAVE2pytorch import DAVE2PytorchModel, DAVE2v3
+from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
+from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
+from beamngpy import ProceduralCube
 from wand.image import Image as WandImage
 
 # globals
@@ -311,25 +306,22 @@ def spawn_point(default_scenario, road_id, reverse=False, seg=1):
     elif default_scenario == "jungle_rock_island":
         return {'pos': (-10.0, 580.73, 156.8), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
 
-def setup_sensors(vehicle, img_dims, fov=51):
-    # Set up sensors
-    fov = fov # 60 works for full lap #63 breaks on hairpin turn
-    resolution = img_dims #(240, 135) #(400,225) #(320, 180) #(1280,960) #(512, 512)
+def setup_sensors(bng, vehicle, img_dims, fov=51):
     pos = (-0.5, 0.38, 1.3)
     direction = (0, 1.0, 0)
-    front_camera = Camera(pos, direction, fov, resolution,
-                          colour=True, depth=True, annotation=True)
+    front_camera = Camera(name='front_cam', bng=bng, vehicle=vehicle, pos=pos, dir=direction, field_of_view_y=fov, resolution=img_dims,
+                          is_render_colours=True, is_render_depth=True, is_render_annotations=True)
 
-    gforces = GForces()
-    electrics = Electrics()
-    damage = Damage()
-    timer = Timer()
+    # gforces = GForces()
+    # electrics = Electrics()
+    # damage = Damage()
+    # timer = Timer()
 
-    vehicle.attach_sensor('front_cam', front_camera)
-    vehicle.attach_sensor('gforces', gforces)
-    vehicle.attach_sensor('electrics', electrics)
-    vehicle.attach_sensor('damage', damage)
-    vehicle.attach_sensor('timer', timer)
+    # vehicle.attach_sensor(, front_camera)
+    # vehicle.attach_sensor('gforces', gforces)
+    # vehicle.attach_sensor('electrics', electrics)
+    # vehicle.attach_sensor('damage', damage)
+    # vehicle.attach_sensor('timer', timer)
     return vehicle
 
 def ms_to_kph(wheelspeed):
@@ -467,9 +459,9 @@ def plot_racetrack_roads(roads, bng, default_scenario, road_id, reverse=False):
 
 def road_analysis(bng, road_id):
     global centerline, roadleft, roadright
-    # plot_racetrack_roads(bng.get_roads(), bng)
+    plot_racetrack_roads(bng.scenario.get_roads(), bng)
     print(f"Getting road {road_id}...")
-    edges = bng.get_road_edges(road_id)
+    edges = bng.scenario.get_road_edges(road_id)
     actual_middle = [edge['middle'] for edge in edges]
     roadleft = [edge['left'] for edge in edges]
     roadright = [edge['right'] for edge in edges]
@@ -597,59 +589,32 @@ def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
 #     dist = min(distance_from_centerline)
 #     return dist > 5.0, dist
 
-def add_qr_cubes(scenario):
-    global qr_positions
-    qr_positions = []
-    with open(f'posefiles/qr_box_locations-{road_id}-swerve0.txt', 'r') as f:
-        lines = f.readlines()
-        for i, line in enumerate(lines):
-            if "platform=" in line:
-                line = line.replace("platform=", "")
-                line = line.split(' ')
-                pos = line[0].split(',')
-                pos = tuple([float(i) for i in pos])
-                rot_quat = line[1].split(',')
-                rot_quat = tuple([float(j) for j in rot_quat])
-                size= float(line[2])
-                cube = ProceduralCube(name='cube_platform',
-                                      pos=pos,
-                                      rot=None,
-                                      rot_quat=rot_quat,
-                                      size=(2, size, 0.5))
-                scenario.add_procedural_mesh(cube)
-            else:
-                line = line.split(' ')
-                pos = line[0].split(',')
-                pos = tuple([float(i) for i in pos])
-                rot_quat = line[1].split(',')
-                rot_quat = tuple([float(j) for j in rot_quat])
-                qr_positions.append([copy.deepcopy(pos), copy.deepcopy(rot_quat)])
-                box = ScenarioObject(oid='qrbox_{}'.format(i), name='qrbox2', otype='BeamNGVehicle', pos=pos, rot=None,
-                                      rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
-                scenario.add_object(box)
-
 def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
     global base_filename
 
     random.seed(1703)
-    setup_logging()
     print(road_id)
-    beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
-    # beamng = BeamNGpy('localhost', 64256, home='C:/Users/Meriel/Documents/BeamNG.tech.v0.21.3.0', user='C:/Users/Meriel/Documents/BeamNG.tech')
-    scenario = Scenario(default_scenario, 'research_test')
+    # beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
+    beamng = BeamNGpy("localhost", port, home='C:/Users/Meriel/Documents/BeamNG.tech.v0.21.3.0', user='C:/Users/Meriel/Documents/BeamNG.tech')
+    beamng.open(launch=True)
+    bng = beamng
+
+    scenario = Scenario(default_scenario, 'Evaluator test', description="Ensuring the evaluator can repair any fault")
     vehicle = Vehicle('ego_vehicle', model=vehicle_model, licence='EGO', color=default_color)
-    vehicle = setup_sensors(vehicle, img_dims, fov=fov)
+
     spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
     print(default_scenario, road_id, seg, spawn)
-    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
+    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
     print(road_id)
-    scenario.make(beamng)
-    bng = beamng.open(launch=True)
-    bng.set_deterministic()
-    bng.set_steps_per_second(steps_per_sec)
-    bng.load_scenario(scenario)
-    bng.start_scenario()
+
+    scenario.make(bng)
+    bng.settings.set_deterministic(steps_per_sec)
+    bng.scenario.load(scenario)
+    # bng.ui.hide_hud()
+    bng.scenario.start()
+
+    vehicle = setup_sensors(bng, vehicle, img_dims, fov=fov)
     ai_line, bng = create_ai_line_from_road_with_interpolation(spawn, bng, road_id)
     bng.pause()
     assert vehicle.skt
@@ -953,7 +918,7 @@ def main():
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
 
     vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
-                                          beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
+                                          beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64956)
     distances = []
     deviations = []
     episode_steps = []
