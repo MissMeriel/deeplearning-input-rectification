@@ -5,70 +5,91 @@ import cv2
 import random
 import numpy as np
 import matplotlib
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 import logging
-from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
-from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
+# from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
+# from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
 
-import scipy.misc
-import copy
-import torch
-import torchvision.transforms as transforms
-import statistics, math
-from scipy.spatial.transform import Rotation as R
-from scipy import interpolate
-import PIL
 import time
+import sys
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import torchvision.transforms as T
-from stable_baselines3 import DQN
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.callbacks import EvalCallback
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.nn.functional as F
+# import torchvision.transforms as T
+# from stable_baselines3 import DQN
+# from stable_baselines3.common.monitor import Monitor
+# from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
+# from stable_baselines3.common.evaluation import evaluate_policy
+# from stable_baselines3.common.callbacks import EvalCallback
 
-'''
-Actor-Critic Learner with continuous action space
-actor-critic model based on Microsoft example:
-https://github.com/microsoft/AI-For-Beginners/blob/main/lessons/6-Other/22-DeepRL/CartPole-RL-TF.ipynb
-DQN from microsoft example:
-https://microsoft.github.io/AirSim/reinforcement_learning/
-'''
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(prog='ProgramName',
+                    description='What the program does',
+                    epilog='Text at the bottom of help')
+    parser.add_argument("-t", '--transformation', type=str,
+                        help='transformation type (resinc, resdec, fisheye, or depth)')
+    parser.add_argument('-s', '--scenario', type=str,
+                        help='road segment to learn (Rturn, Lturn, straight, or winding)')
+    parser.add_argument('-d', '--path2src', type=str, default="C:/Users/Meriel/Documents",
+                        help='road segment to learn (Rturn, Lturn, straight, or winding)')
+    parser.add_argument('-b', '--beamnginstance', type=str, default="BeamNG.research",
+                        help='parent directory of BeamNG instance')
+    parser.add_argument('-p', '--port', type=int, default=64156,
+                        help='port to communicate with BeamNG simulator (try 64156, 64356, 64556...)')
+    args = parser.parse_args()
+    print(args.transformation, args.scenario, args.path2src, args.beamnginstance, args.port)
+    return args
 
-# set up matplotlib
-is_ipython = 'inline' in matplotlib.get_backend()
-if is_ipython:
-    from IPython import display
+args = parse_args()
 
-def main(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn"):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+sys.path.append(f'{args.path2src}/GitHub/DAVE2-Keras')
+sys.path.append(f'{args.path2src}/GitHub/deeplearning-input-rectification/models/')
+sys.path.append(f'{args.path2src}/GitHub/deeplearning-input-rectification/simulation/')
+sys.path.append(f'{args.path2src}/GitHub/BeamNGpy')
+sys.path.append(f'{args.path2src}/GitHub/BeamNGpy/src/')
+sys.path.append(f'{args.path2src}/GitHub/DPT/')
+
+
+# # set up matplotlib
+# is_ipython = 'inline' in matplotlib.get_backend()
+# if is_ipython:
+#     from IPython import display
+
+def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn", transf="fisheye",
+                beamnginstance="BeamNG.research", port=64156):
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"F:/RRL-results/RLtrain{label}-resinc-max200-0.05eval-{timestr}-{randstr}"
+    newdir = f"F:/RRL-results/RLtrain{label}-{transf}-max200-0.05eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
-        shutil.copy(f"{os.getcwd()}/DDPGHumanenv4writedata.py", newdir)
+        shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedata.py", newdir)
+    newdir_eval = f"F:/RRL-results/RLtrain{label}-{transf}-max200-0.05eval-eval-{timestr}-{randstr}"
+    if not os.path.exists(newdir):
+        os.mkdir(newdir_eval)
 
     from DDPGHumanenv4writedata import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model="DDPGMLPSingle", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
-                 beamnginstance="BeamNG.research", port=64156, scenario=scenario, road_id=road_id, reverse=False,
-                 base_model=model_filename, test_model=False, seg=seg)
+                 beamnginstance=beamnginstance, port=port, scenario=scenario, road_id=road_id, reverse=False,
+                 base_model=model_filename, test_model=False, seg=seg, transf=transf)
+
+    eval_env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model="DDPGMLPSingle", filepathroot=newdir_eval, beamngpath='C:/Users/Meriel/Documents',
+                 beamnginstance='BeamNG.researchINSTANCE4', port=64956, scenario=scenario, road_id=road_id, reverse=False,
+                 base_model=model_filename, test_model=False, seg=seg, transf=transf)
 
     start_time = time.time()
     from stable_baselines3 import DDPG
     from stable_baselines3.common.noise import NormalActionNoise
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.000025 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.0005 * np.ones(n_actions))
     model = DDPG(
-        "MlpPolicy",
+        "CnnPolicy",
         env,
         action_noise=action_noise,
         learning_rate=0.001,
@@ -85,31 +106,44 @@ def main(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", se
     callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=200, verbose=1)
     callbacks = []
     eval_callback = EvalCallback(
-        env,
+        eval_env,
         callback_on_new_best=callback_max_episodes,
         callback_after_eval=callback_max_episodes,
-        n_eval_episodes=1,
+        n_eval_episodes=5,
         best_model_save_path=f"{newdir}",
         log_path=f"{newdir}",
-        eval_freq=20000,
+        eval_freq=10000,
         verbose=1
     )
-    #everyN_callback = EveryNTimesteps(n_steps=50, callback=callback_max_episodes)
+    # everyN_callback = EveryNTimesteps(n_steps=50, callback=callback_max_episodes)
+    # callbacks.append(everyN_callback)
     callbacks.append(eval_callback)
     callbacks.append(callback_max_episodes)
-    #callbacks.append(everyN_callback)
     kwargs = {}
     kwargs["callback"] = callbacks
     # Train for a certain number of timesteps
     model.learn(total_timesteps=5e10, tb_log_name="DDPG-sb3_car_run_" + str(time.time()), **kwargs)
 
     print(f"Time to train: {(time.time()-start_time)/60:.1f} minutes")
-    env.close()
+    #env.close()
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True
     logging.getLogger('PIL').setLevel(logging.WARNING)
-    #main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
-    main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
-    main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
-    main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
+    args = parse_args()
+
+    if args.transformation == "resinc":
+        obs_shape = (3, 270, 480)
+    elif args.transformation == "resdec":
+        obs_shape = (3, 54, 96)
+    elif args.transformation == "fisheye" or args.transformation == "depth":
+        obs_shape = (3, 135, 240)
+
+    if args.scenario == "Rturn":
+        run_RLtrain(obs_shape=obs_shape, scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn", transf=args.transformation, beamnginstance=args.beamnginstance, port=args.port)
+    elif args.scenario == "Lturn":
+        run_RLtrain(obs_shape=obs_shape, scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn", transf=args.transformation, beamnginstance=args.beamnginstance, port=args.port)
+    elif args.scenario == "straight":
+        run_RLtrain(obs_shape=obs_shape, scenario="automation_test_track", road_id="8185", seg=None, label="straight", transf=args.transformation, beamnginstance=args.beamnginstance, port=args.port)
+    elif args.scenario == "winding":
+        run_RLtrain(obs_shape=obs_shape, scenario="west_coast_usa", road_id="10988", seg=1, label="windy", transf=args.transformation, beamnginstance=args.beamnginstance, port=args.port)

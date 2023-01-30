@@ -7,7 +7,7 @@ import time
 import matplotlib
 from matplotlib import pyplot as plt
 import logging
-from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
+from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
 from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
 
 import scipy.misc
@@ -21,15 +21,12 @@ import PIL
 import time
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.nn.functional as F
 import torchvision.transforms as T
-from stable_baselines3 import DQN
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.callbacks import EvalCallback
+
+from wand.image import Image
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -62,9 +59,10 @@ class CarEnv(gym.Env):
 
     def __init__(self, image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DDPG", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
                  beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
-                 base_model=None, test_model=False, seg=None):
+                 base_model=None, test_model=False, seg=None, transf=None):
         super(CarEnv, self).__init__()
         self.start_time = time.time()
+        self.transf = transf
         self.f = None
         self.ep_dir = None
         self.seg = seg
@@ -97,10 +95,10 @@ class CarEnv(gym.Env):
         self.runtime = 0.0
         self.episode = -1
         random.seed(1703)
-        setup_logging()
+        #setup_logging()
         self.model = model
         self.deflation_pattern = filepathroot
-        self.beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
+        beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
 
         self.scenario = Scenario(self.default_scenario, 'RL_Agent-train')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")
@@ -119,8 +117,8 @@ class CarEnv(gym.Env):
         #                         colour=True, depth=False, annotation=False)
         # self.scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
 
-        self.scenario.make(self.beamng)
-        self.bng = self.beamng.open(launch=True)
+        self.scenario.make(beamng)
+        self.bng = beamng.open(launch=True)
 
         self.bng.set_deterministic()
         self.bng.set_steps_per_second(self.steps_per_sec)
@@ -168,6 +166,7 @@ class CarEnv(gym.Env):
         #if self.obs_shape != self.image_shape:
         #    image = np.array(sensors['quarterres_cam']['colour'].convert('RGB'), dtype=np.uint8)
         image = image.reshape(self.obs_shape)
+
         # self.state["prev_image"] = self.state["image"]
         # self.state["image"] = image
         if self.episode_steps == 0:
@@ -179,6 +178,21 @@ class CarEnv(gym.Env):
         r, g, b = rgb[:,:,0], rgb[:,:,1], rgb[:,:,2]
         gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
         return np.array(gray, dtype=np.uint8)
+
+    def fisheye(self, image):
+        with Image.from_array(image) as img:
+            img.virtual_pixel = 'transparent'
+            img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
+            return np.array(img)
+
+    def fisheye_inv(self, image):
+        with Image.from_array(image) as img:
+            img.virtual_pixel = 'transparent'
+            # img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
+            img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
+            img = np.array(img)
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            return img
 
     def step(self, action):
         if self.default_scenario == "hirochi_raceway" and self.road_id == "9039" and self.seg == 0:
@@ -201,6 +215,8 @@ class CarEnv(gym.Env):
             self.runtime = sensors['timer']['time'] - self.start_time
             throttle = self.throttle_PID(kph, dt)
             image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            if self.transf == "fisheye":
+                image = self.fisheye_inv(image)
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
             img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             cv2.imshow("true image", img)
@@ -210,7 +226,7 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-            if abs(action.item()) < 0.1:
+            if abs(action.item()) < 0.05:
                 steer = float(base_model_inf)
                 blackedout = np.zeros(image.shape) # BLACK
                 cv2.imshow("action image", blackedout)
@@ -245,6 +261,8 @@ class CarEnv(gym.Env):
             dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
             self.runtime = self.car_state['timer']['time'] - self.start_time
             image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            if self.transf == "fisheye":
+                image = self.fisheye_inv(image)
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
             cv2.imshow("true image", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
@@ -303,13 +321,36 @@ class CarEnv(gym.Env):
             return -abs(expert_action - agent_action)
 
     def close(self):
-        self.bng.close()
-        self.beamng.close()
         self.f.close()
+        self.vehicle.close()
+        self.bng.kill_beamng()
+        self.bng.close()
+        super.close()
+
+    def get_progress(self):
+        dist = self.get_distance_traveled(self.current_trajectory)
+        dist_from_centerline = []
+        for i in self.current_trajectory:
+            distance_from_centerline = self.dist_from_line(self.centerline_interpolated, i)
+            dist_from_centerline.append(min(distance_from_centerline))
+
+        summary = {
+            "episode": self.episode,
+            "rewards": self.current_rewards,
+            "trajectory": self.current_trajectory,
+            "total_steps": self.episode_steps,
+            "frames_adjusted_count": self.frames_adjusted,
+            "dist_from_centerline": dist_from_centerline,
+            "image_shape": self.image_shape,
+            "obs_shape": self.obs_shape,
+            "action_space": self.action_space,
+            "dist_travelled": dist
+        }
+        return summary
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > -1:
+        if self.episode > -1 and not self.test_model:
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -499,20 +540,29 @@ class CarEnv(gym.Env):
     def setup_sensors(self):
         camera_pos = (-0.5, 0.38, 1.3)
         camera_dir = (0, 1.0, 0)
-        fov = 51 # 60 works for full lap #63 breaks on hairpin turn
+        if self.transf == "fisheye":
+            fov = 75
+        else:
+            fov = 51 # 60 works for full lap #63 breaks on hairpin turn
+
         width = int(self.obs_shape[2])
         height = int(self.obs_shape[1])
         resolution = (width, height)
-        front_camera = Camera(camera_pos, camera_dir, fov, resolution,
-                              colour=True, depth=False, annotation=False)
-        quarterres_camera = Camera(camera_pos, camera_dir, fov, (self.obs_shape[2], self.obs_shape[1]),
-                              colour=True, depth=False, annotation=False)
+        if self.transf == "depth":
+            front_camera = Camera(camera_pos, camera_dir, fov, resolution,
+                                  colour=True, depth=True, annotation=False, near_far=(1, 50))
+            far_camera = Camera(camera_pos, camera_dir, fov, (self.obs_shape[2], self.obs_shape[1]),
+                                  colour=True, depth=True, annotation=False, near_far=(1, 100))
+        else:
+            front_camera = Camera(camera_pos, camera_dir, fov, resolution,
+                                  colour=True, depth=True, annotation=False)
         gforces = GForces()
         electrics = Electrics()
         damage = Damage()
         timer = Timer()
         self.vehicle.attach_sensor('front_cam', front_camera)
-        #self.vehicle.attach_sensor('quarterres_cam', quarterres_camera)
+        if self.transf == "depth":
+            self.vehicle.attach_sensor('far_camera', far_camera)
         self.vehicle.attach_sensor('gforces', gforces)
         self.vehicle.attach_sensor('electrics', electrics)
         self.vehicle.attach_sensor('damage', damage)

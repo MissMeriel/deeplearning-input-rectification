@@ -57,7 +57,7 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"CAMtest-depth60100-{timestr}-{randstr}"
+    newdir = f"RLtest-resdec-straight-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -66,16 +66,19 @@ def main():
 
     from TestEnv import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
-                 beamnginstance="BeamNG.researchINSTANCE4", port=64956, scenario="hirochi_raceway", road_id="9039", reverse=False,
-                 base_model=model_filename, test_model=True, seg=0)
+    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
+                 beamnginstance="BeamNG.researchINSTANCE2", port=64156, scenario="automation_test_track", road_id="8185", reverse=False,
+                 base_model=model_filename, test_model=True, seg=None, transf="fisheye")
+    # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
+    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
+    # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
+    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
     start_time = time.time()
     from stable_baselines3 import DDPG
 
-    # model = DDPG.load("RLtrain-max200epi-DDPGhuman-0.05evaleps-bigimg-1_19-20_43-IW6ZTT/best_model", print_system_info=True)
-    model = DDPG.load("F:\old-RRL-results\RLtrain-max200epi-DDPGhuman-0.05evaleps-tinyimg-1_18-16_40-YQPJKY/best_model", print_system_info=True)
-    # test model loaded properly
-    # testinput = np.random.random((1, 84, 150))
+    model = DDPG.load("F:/RRL-results/RLtrainstraight-resdec-max200-0.05eval-1_25-10_34-3DPMZU/best_model", print_system_info=True)
+    print(model.policy.actor_target.mu)
+    print("\n\n", model.policy.actor.mu)
     # pred = model.predict(testinput)
     # print(f"{pred=}\t{setpoint=}\t{steer=}")
     start_time = time.time()
@@ -85,8 +88,7 @@ def main():
     episodes = 0
     results = []
     while not done or not crashed:
-        action, _ = model.predict(obs, deterministic=False)
-        # print(action)
+        action, _ = model.predict(obs, deterministic=True)
         obs, reward, done, state = env.step(action)
         crashed = state.get('collision', True)
         if done or crashed:
@@ -108,8 +110,8 @@ def main():
         ep_count += r["total_steps"]
         frames_adjusted += r["frames_adjusted_count"]
     print(f"AVERAGE OVER {episodes} RUNS:"
-          f"\n\tdist travelled:{sum(dists) / len(dists):1f}"
-          f"\n\tdist from ctrline:{np.std(centerline_dists):3f}"
+          f"\n\tdist travelled:{(sum(dists) / len(dists)):1f}"
+          f"\n\tdist from ctrline:{(sum(centerline_dists) / len(centerline_dists)):3f}"
           f"\n\tintervention rate:{frames_adjusted / ep_count:3f}")
 
 

@@ -406,6 +406,7 @@ def test_artifical_depth_estimation():
     plt.show()
     cv2.imwrite("test_result2.jpg", result[:,:,::-1])
 
+
 if __name__ == '__main__':
     # test_artifical_depth_estimation()
     # test_depth_of_field_standalone()

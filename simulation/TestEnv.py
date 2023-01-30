@@ -3,10 +3,11 @@ import string
 import cv2
 import random
 import numpy as np
+import time
 import matplotlib
 from matplotlib import pyplot as plt
 import logging
-from beamngpy import BeamNGpy, Scenario, Vehicle, setup_logging, StaticObject, ScenarioObject
+from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
 from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
 
 import scipy.misc
@@ -20,15 +21,12 @@ import PIL
 import time
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.nn.functional as F
 import torchvision.transforms as T
-from stable_baselines3 import DQN
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.callbacks import EvalCallback
+
+from wand.image import Image
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -59,10 +57,15 @@ class CarEnv(gym.Env):
 
     metadata = {"render.modes": ["rgb_array"]}
 
-    def __init__(self, image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DQN", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
+    def __init__(self, image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DDPG", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
                  beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
-                 base_model=None, test_model=False):
+                 base_model=None, test_model=False, seg=None, transf=None):
         super(CarEnv, self).__init__()
+        self.start_time = time.time()
+        self.transf = transf
+        self.f = None
+        self.ep_dir = None
+        self.seg = seg
         self.test_model = test_model
         self.action_space = spaces.Box(low=-2, high=2, shape=(1,1), dtype=np.float32)
         self.transform = T.Compose([T.ToTensor()])
@@ -90,9 +93,9 @@ class CarEnv(gym.Env):
         self.image_shape = image_shape
         self.steps_per_sec = 30
         self.runtime = 0.0
-        self.episode = 0
+        self.episode = -1
         random.seed(1703)
-        setup_logging()
+        #setup_logging()
         self.model = model
         self.deflation_pattern = filepathroot
         beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
@@ -107,12 +110,12 @@ class CarEnv(gym.Env):
         self.scenario.add_vehicle(self.vehicle, pos=self.spawn['pos'], rot=None, rot_quat=self.spawn['rot_quat'])
 
         # setup free camera
-        cam_pos = (973.684363136209, -854.1390707377659, self.spawn['pos'][2] + 500)
-        eagles_eye_cam = Camera(cam_pos, #(0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
-                                (self.spawn['rot_quat'][0], self.spawn['rot_quat'][1], -1.39813470840454, 0.91656774282455),
-                                fov=90, resolution=(1500, 1500),
-                                colour=True, depth=False, annotation=False)
-        self.scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
+        # cam_pos = (973.684363136209, -854.1390707377659, self.spawn['pos'][2] + 500)
+        # eagles_eye_cam = Camera(cam_pos, #(0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
+        #                         (self.spawn['rot_quat'][0], self.spawn['rot_quat'][1], -1.39813470840454, 0.91656774282455),
+        #                         fov=90, resolution=(1500, 1500),
+        #                         colour=True, depth=False, annotation=False)
+        # self.scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
 
         self.scenario.make(beamng)
         self.bng = beamng.open(launch=True)
@@ -131,8 +134,8 @@ class CarEnv(gym.Env):
 
         print(f"midpoint={self.centerline_interpolated[int(len(self.centerline_interpolated)/2)]}")
 
-        freecams = self.scenario.render_cameras()
-        freecams['eagles_eye_cam']["colour"].convert('RGB').save(f"eagles-eye-view-{self.default_scenario}-{self.road_id}.jpg", "JPEG")
+        # freecams = self.scenario.render_cameras()
+        # freecams['eagles_eye_cam']["colour"].convert('RGB').save(f"eagles-eye-view-{self.default_scenario}-{self.road_id}.jpg", "JPEG")
         assert self.vehicle.skt
         ###########################################################################
         self.observation_space = spaces.Box(0, 255, shape=self.obs_shape, dtype=np.uint8)
@@ -158,12 +161,12 @@ class CarEnv(gym.Env):
         self.current_trajectory.append(self.vehicle.state["pos"])
         self.car_state = sensors
         self.state["pose"] = self.vehicle.state["pos"]
-        # kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
-        self.state["collision"] = sensors["damage"]["damage"] > 0
+        self.state["collision"] = sensors["damage"]["damage"] > 1
         image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
-        if self.obs_shape != self.image_shape:
-            image = np.array(sensors['quarterres_cam']['colour'].convert('RGB'), dtype=np.uint8)
+        #if self.obs_shape != self.image_shape:
+        #    image = np.array(sensors['quarterres_cam']['colour'].convert('RGB'), dtype=np.uint8)
         image = image.reshape(self.obs_shape)
+
         # self.state["prev_image"] = self.state["image"]
         # self.state["image"] = image
         if self.episode_steps == 0:
@@ -176,10 +179,35 @@ class CarEnv(gym.Env):
         gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
         return np.array(gray, dtype=np.uint8)
 
+    def fisheye(self, image):
+        with Image.from_array(image) as img:
+            img.virtual_pixel = 'transparent'
+            img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
+            return np.array(img)
+
+    def fisheye_inv(self, image):
+        with Image.from_array(image) as img:
+            img.virtual_pixel = 'transparent'
+            # img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
+            img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
+            img = np.array(img)
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            return img
+
     def step(self, action):
-        # (601.547,53.4482,43.29) quat(-0.033713240176439,0.038085918873549,0.99870544672012,-0.00058328913291916)
-        # (491.521,119.336,30.25) quat(-0.062928266823292,0.038666535168886,0.68600910902023,0.72383457422256)
-        cutoff_point = [601.547, 53.4482, 43.29]
+        if self.default_scenario == "hirochi_raceway" and self.road_id == "9039" and self.seg == 0:
+            cutoff_point = [368.466, -206.154, 43.8237]
+        elif self.default_scenario == "automation_test_track" and self.road_id == "8185":
+            # cutoff_point = [-44.8323, -256.138, 120.186] # 200m
+            cutoff_point = [56.01722717285156, -272.89007568359375, 120.56710052490234]  # 100m
+        elif self.default_scenario == "west_coast_usa" and self.road_id == "12930":
+            cutoff_point = [-296.55999755859375, -730.234130859375, 136.71339416503906]
+        elif self.default_scenario == "west_coast_usa" and self.road_id == "10988" and self.seg == 1:
+            # cutoff_point = [843.5116577148438, 5.83634090423584, 147.02598571777344] # a little too early
+            # cutoff_point = [843.5073852539062, 6.2438249588012695, 147.01889038085938] # middle
+            cutoff_point = [843.6112670898438, 6.58771276473999, 147.01829528808594]  # late
+        else:
+            cutoff_point = [601.547, 53.4482, 43.29]
         if self.test_model:
             sensors = self.bng.poll_sensors(self.vehicle)
             kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
@@ -187,6 +215,8 @@ class CarEnv(gym.Env):
             self.runtime = sensors['timer']['time'] - self.start_time
             throttle = self.throttle_PID(kph, dt)
             image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            if self.transf == "fisheye":
+                image = self.fisheye_inv(image)
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
             img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             cv2.imshow("true image", img)
@@ -195,7 +225,6 @@ class CarEnv(gym.Env):
             features = self.transform(image)[None]
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
-            # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
 
             if abs(action.item()) < 0.05:
                 steer = float(base_model_inf)
@@ -222,7 +251,7 @@ class CarEnv(gym.Env):
             reward = 0
 
             self.episode_steps += 1
-            done = outside_track or self.state["collision"]
+            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 12)
             self.current_rewards.append(reward)
             return obs, reward, done, self.state
 
@@ -232,6 +261,8 @@ class CarEnv(gym.Env):
             dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
             self.runtime = self.car_state['timer']['time'] - self.start_time
             image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            if self.transf == "fisheye":
+                image = self.fisheye_inv(image)
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
             cv2.imshow("true image", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
@@ -266,8 +297,16 @@ class CarEnv(gym.Env):
             self.vehicle.update_vehicle()
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             reward = self.calc_reward(base_model_inf + action.item(), expert_action)
+
+            position = str(self.state['pose']).replace(",", " ")
+            orientation = str(self.vehicle.state['dir']).replace(",", " ")
+            img_filename = f"{self.ep_dir}/sample-ep{self.episode:03d}-{self.episode_steps:05d}.jpg"
+            self.car_state['front_cam']['colour'].convert('RGB').save(img_filename, "JPEG")
+            self.f.write(f"{img_filename.split('/')[-1]},{taken_action},{position},{orientation},{kph},{self.car_state['electrics']['steering']},{throttle}\n")
+
             self.episode_steps += 1
-            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 20)
+            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 12)
+
             self.current_rewards.append(reward)
             # print(f"STEP() \n\troad_seg {theta_deg=:.1f}\t car-to-CL theta_deg={cartocl_theta_deg:.1f}\n\texpert_action={expert_action:.3f}\t\t{base_model_inf=:.3f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
             return obs, reward, done, self.state
@@ -281,10 +320,18 @@ class CarEnv(gym.Env):
         else:
             return -abs(expert_action - agent_action)
 
+    def close(self):
+        try:
+            self.f.close()
+            # self.vehicle.close()
+            self.bng.close()
+            super.close()
+        except:
+            pass
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > 0:
+        if self.episode > -1:
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -303,9 +350,10 @@ class CarEnv(gym.Env):
                 "dist_from_centerline": dist_from_centerline,
                 "image_shape":self.image_shape,
                 "obs_shape": self.obs_shape,
-                "action_space": self.action_space
+                "action_space": self.action_space,
+                "wall_clock_time": time.time() - self.start_time
             }
-            picklefile = open(f"{self.deflation_pattern}-summary-epi{self.episode:04d}.pickle", 'wb')
+            picklefile = open(f"{self.deflation_pattern}/summary-epi{self.episode:03d}.pickle", 'wb')
             pickle.dump(summary, picklefile)
             picklefile.close()
 
@@ -315,22 +363,37 @@ class CarEnv(gym.Env):
                   f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
                   f"\n\ttotal steps: {self.episode_steps}"
                   f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
-            self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f"avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"), start_viz=False)
+            self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
+                                save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
             self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
 
+            # SET UP FOR NEXT EPISODE
+            # if self.f is not None:
+            self.f.close()
 
-        # SET UP FOR NEXT EPISODE
         self.episode += 1
+
+        self.ep_dir = f"{self.deflation_pattern}/ep{self.episode:03d}"
+        if not os.path.exists(self.ep_dir):
+            # os.mkdir(self.ep_dir)
+            os.makedirs(self.ep_dir)
+        self.f = open(f"{self.ep_dir}/data.csv", "w")
+        self.f.write(f"filename,steering_input,pos,dir,kph,steering,throttle_input\n")
+
+
         self.episode_steps, self.frames_adjusted = 0, 0
         self.current_trajectory = []
         self.current_rewards = []
         self.integral, self.prev_error = 0.0, 0.0
         self.bng.restart_scenario()
-        self.bng.step(1, wait=True)
-        self.vehicle.update_vehicle()
+        kph = 0
+        while kph < 35:
+            self.vehicle.update_vehicle()
+            sensors = self.bng.poll_sensors(self.vehicle)
+            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
+            self.vehicle.control(throttle=1., steering=0., brake=0.0)
+            self.bng.step(1, wait=True)
         sensors = self.bng.poll_sensors(self.vehicle)
-        # spawnpoint = [290.558, -277.28, 46.0]
-        # endpoint = self.actual_middle[-1]
         self.transform = transforms.Compose([transforms.ToTensor()])
         self.prev_error = self.setpoint
         self.overall_damage, self.runtime, self.wheelspeed, self.distance_from_center = 0.0, 0.0, 0.0, 0.0
@@ -346,6 +409,7 @@ class CarEnv(gym.Env):
         self.done = False
         self.states, self.actions, self.probs, self.rewards, self.critic_values = [], [], [], [], []
         self.traj = []
+
         return obs
 
     # bad = 0, good = 1
@@ -457,26 +521,36 @@ class CarEnv(gym.Env):
     def setup_sensors(self):
         camera_pos = (-0.5, 0.38, 1.3)
         camera_dir = (0, 1.0, 0)
-        fov = 51 # 60 works for full lap #63 breaks on hairpin turn
-        width = int(self.image_shape[2])
-        height = int(self.image_shape[1])
+        if self.transf == "fisheye":
+            fov = 75
+        else:
+            fov = 51 # 60 works for full lap #63 breaks on hairpin turn
+
+        width = int(self.obs_shape[2])
+        height = int(self.obs_shape[1])
         resolution = (width, height)
-        front_camera = Camera(camera_pos, camera_dir, fov, resolution,
-                              colour=True, depth=False, annotation=False)
-        quarterres_camera = Camera(camera_pos, camera_dir, fov, (self.obs_shape[2], self.obs_shape[1]),
-                              colour=True, depth=False, annotation=False)
+        if self.transf == "depth":
+            front_camera = Camera(camera_pos, camera_dir, fov, resolution,
+                                  colour=True, depth=True, annotation=False, near_far=(1, 50))
+            far_camera = Camera(camera_pos, camera_dir, fov, (self.obs_shape[2], self.obs_shape[1]),
+                                  colour=True, depth=True, annotation=False, near_far=(1, 100))
+        else:
+            front_camera = Camera(camera_pos, camera_dir, fov, resolution,
+                                  colour=True, depth=True, annotation=False)
         gforces = GForces()
         electrics = Electrics()
         damage = Damage()
         timer = Timer()
         self.vehicle.attach_sensor('front_cam', front_camera)
-        self.vehicle.attach_sensor('quarterres_cam', quarterres_camera)
+        if self.transf == "depth":
+            self.vehicle.attach_sensor('far_camera', far_camera)
         self.vehicle.attach_sensor('gforces', gforces)
         self.vehicle.attach_sensor('electrics', electrics)
         self.vehicle.attach_sensor('damage', damage)
         self.vehicle.attach_sensor('timer', timer)
 
     def spawn_point(self):
+        print(f"{self.default_scenario=}\t{self.road_id=}")
         lanewidth = 2.75
         if self.default_scenario == 'cliff':
             #return {'pos':(-124.806, 142.554, 465.489), 'rot':None, 'rot_quat':(0, 0, 0.3826834, 0.9238795)}
@@ -529,10 +603,30 @@ class CarEnv(gym.Env):
                 return {'pos': (57.04786682128906, -150.53302001953125, 125.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -115)}
             elif self.road_id == "10673":
                 return {'pos': (-21.712169647216797, -826.2122802734375, 133.1), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
-            elif self.road_id == "12930": # 13492 dirt road
-                return {'pos': (-347.16302490234375,-824.6746215820312,137.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
-            elif self.road_id == "10988":
-                return {'pos': (622.163330078125,-251.1154022216797,146.99), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
+            elif self.road_id == "12930":  # 13492 dirt road
+                # return {'pos': (-347.2, -824.7, 137.5), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                return {'pos': (-353.731, -830.905, 137.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+            elif self.road_id == "10988":  # track
+                # return {'pos': (622.2, -251.1, 147.0), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -60)}
+                # return {'pos': (660.388,-247.67,147.5), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -160)}
+                if self.seg == 0:  # straight portion
+                    return {'pos': (687.5048828125, -185.7435302734375, 146.9), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                elif self.seg == 1:  # approaching winding portion
+                    #  crashes around [846.0238647460938, 127.84288787841797, 150.64915466308594]
+                    # return {'pos': (768.1991577148438, -108.50184631347656, 146.9), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                    return {'pos': (781.2423095703125, -95.72360229492188, 147.4), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                    return {'pos': (790.599, -86.7973, 147.3), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}  # slightly better?
+                elif self.seg == 2:
+                    return {'pos': (854.4083862304688, 136.79324340820312, 152.7), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                else:
+                    return {'pos': (599.341, -252.333, 147.6), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -60)}
+                # other end of the gas station-airfield yellow road
+                # return {'pos': (622.163330078125,-251.1154022216797,146.99), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -90)}
             elif self.road_id == "13306":
                 return {'pos': (-310,-790.044921875,137.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.278, 0.961), -30)}
             elif self.road_id == "13341":
@@ -584,8 +678,9 @@ class CarEnv(gym.Env):
             elif self.road_id == "8293":
                 return {'pos': (-556.185, 386.985, 145.5), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.702719, 0.711467), 120)}
             elif self.road_id == '8185': # highway (open, farm-like)
+                return {'pos': (174.92, -289.7, 120.7), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
                 # return {'pos': (174.9,-289.7,120.8), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.704635, 0.70957), 180)}
-                return {'pos': (36.742,-269.105,120.461), 'rot': None, 'rot_quat': (-0.0070,0.0082,0.7754,0.6314)}
+                # return {'pos': (36.742,-269.105,120.461), 'rot': None, 'rot_quat': (-0.0070,0.0082,0.7754,0.6314)}
                 # return {'pos': (-294.791, -255.693, 118.703), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.704635, 0.70957), 180)}
             elif self.road_id == 'starting line 30m down':
                 # 30m down track from starting line
@@ -637,9 +732,53 @@ class CarEnv(gym.Env):
             elif self.road_id == "racetrackcurves":
                 return {'pos':(215.912,-243.067,45.8604), 'rot': None, 'rot_quat':(0.029027424752712,0.022241719067097,0.98601061105728,0.16262225806713)}
         elif self.default_scenario == "hirochi_raceway":
-            if self.road_id == "9039" or self.road_id == "9040": # good candidate for input rect.
-                #return {'pos': (292.405,-271.64,46.75), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
-                return {'pos': (290.558, -277.280, 46.0), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
+            # if self.road_id == "9039" or self.road_id == "9040": # good candidate for input rect.
+            #     if self.seg == 0:
+            #         return {'pos': (289.327, -281.458, 46.0), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
+            #     else:
+            #         # return {'pos': (292.405,-271.64,46.75), 'rot': None, 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
+            #         return {'pos': (290.558, -277.280, 46.0), 'rot': None,
+            #                 'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.960669), -130)}
+
+            if self.road_id == "9039":  # good candidate for input rect.
+                if self.seg == 0:  # start of track, right turn; 183m; cutoff at (412.079,-191.549,38.2418)
+                    return {'pos': (289.327, -281.458, 46.0), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
+                elif self.seg == 1:  # straight road
+                    return {'pos': (330.3320007324219, -217.5743408203125, 45.7054443359375), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
+                elif self.seg == 2:  # left turn
+                    # return {'pos': (439.0, -178.4, 35.3), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.277698, 0.961), -85)}
+                    # return {'pos': (448.1, -174.6, 34.6), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.277698, 0.961), -85)}
+                    return {'pos': (496.2, -150.6, 35.6), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -85)}
+                elif self.seg == 3:
+                    return {'pos': (538.2, -124.3, 40.5), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -110)}
+                elif self.seg == 4:  # straight; cutoff at vec3(596.333,18.7362,45.6584)
+                    return {'pos': (561.7396240234375, -76.91995239257812, 44.7), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
+                elif self.seg == 5:  # left turn; cutoff at (547.15234375, 115.24089050292969, 35.97171401977539)
+                    return {'pos': (598.3154907226562, 40.60638427734375, 43.9), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -147)}
+                elif self.seg == 6:
+                    return {'pos': (547.15234375, 115.24089050292969, 36.3), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -225)}
+                elif self.seg == 7:
+                    return {'pos': (449.7561340332031, 114.96491241455078, 25.801856994628906), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -225)}
+                elif self.seg == 8:  # mostly straight, good behavior; cutoff at  vec3(305.115,304.196,38.4392)
+                    return {'pos': (405.81732177734375, 121.84907531738281, 25.04170036315918), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -190)}
+                elif self.seg == 9:
+                    return {'pos': (291.171875, 321.78662109375, 38.6), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -190)}
+                elif self.seg == 10:
+                    return {'pos': (216.40045166015625, 367.1772155761719, 35.99), 'rot': None,
+                            'rot_quat': (-0.037829957902431, 0.0035844487138093, 0.87171512842178, 0.48853760957718)}
+                else:
+                    return {'pos': (290.558, -277.280, 46.0), 'rot': None,
+                            'rot_quat': self.turn_X_degrees((0, 0, -0.277698, 0.961), -130)}
             elif self.road_id == "9205":
                 return {'pos': (-401.98, 243.3, 25.5), 'rot': None, 'rot_quat': (0, 0, -0.277698, 0.960669)}
             elif self.road_id == "9156":
@@ -830,7 +969,7 @@ class CarEnv(gym.Env):
 
         return np.hypot(h, c)
 
-    def plot_deviation(self, model, deflation_pattern, start_viz=False):
+    def plot_deviation(self, model, deflation_pattern, save_path=".", start_viz=False):
         plt.figure(20, dpi=180)
         plt.clf()
         i = 0; x = []; y = []
@@ -855,7 +994,7 @@ class CarEnv(gym.Env):
                 y.append(point[1])
             plt.plot(x, y) #, label="Run {}".format(i))
             i += 1
-        plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}')
+        plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}', fontdict={'fontsize' : 8})
         plt.legend(fontsize=8)
         # if start_viz:
         #     plt.xlim([200,400])
@@ -864,7 +1003,7 @@ class CarEnv(gym.Env):
         #     plt.xlim([-350, 650])
         #     plt.ylim([-325, 475])
         plt.draw()
-        plt.savefig(f"{deflation_pattern.split('/')[0]}/trajs-ep{self.episode}-{model}.jpg")
+        plt.savefig(save_path)
         plt.clf()
 
     def get_distance_traveled(self, traj):
@@ -898,7 +1037,7 @@ class CarEnv(gym.Env):
         #     display.display(plt.gcf())
 
         if save:
-            plt.savefig(f"{title}-training_performance.jpg")
+            plt.savefig(f"{title}/training_performance.jpg")
 
     def add_qr_cubes(self, scenario, qrbox_filename='posefiles/qr_box_locations.txt'):
         global qr_positions
@@ -1043,3 +1182,24 @@ class CarEnv(gym.Env):
             keypoints = [[tuple(approx[0]), tuple(approx[3]),
                           tuple(approx[1]), tuple(approx[2])]]
             return keypoints, image
+
+    def get_progress(self):
+        dist = self.get_distance_traveled(self.current_trajectory)
+        dist_from_centerline = []
+        for i in self.current_trajectory:
+            distance_from_centerline = self.dist_from_line(self.centerline_interpolated, i)
+            dist_from_centerline.append(min(distance_from_centerline))
+
+        summary = {
+            "episode": self.episode,
+            "rewards": self.current_rewards,
+            "trajectory": self.current_trajectory,
+            "total_steps": self.episode_steps,
+            "frames_adjusted_count": self.frames_adjusted,
+            "dist_from_centerline": dist_from_centerline,
+            "image_shape": self.image_shape,
+            "obs_shape": self.obs_shape,
+            "action_space": self.action_space,
+            "dist_travelled": dist
+        }
+        return summary
