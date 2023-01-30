@@ -160,7 +160,7 @@ def spawn_point(default_scenario, road_id, reverse=False, seg=1):
             return {'pos': (-456.0, -100.3, 117.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
         elif road_id == "7811":
             return  {'pos': (-146.2, -255.5, 119.95), 'rot': None, 'rot_quat': turn_X_degrees((-0.021, -0.009, 0.740, 0.672), 180)}
-        elif road_id == "8185": # good for saliency testing
+        elif road_id == "12004": # good for saliency testing
             return {'pos': (174.92, -289.7, 120.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.702719, 0.711467), 180)}
             # return {'pos': (-180.4, -253.0, 120.7), 'rot': None, 'rot_quat': (-0.008, 0.004, 0.779, 0.63)}
             return {'pos': (-58.2675, -255.216, 120.175), 'rot': None, 'rot_quat': (-0.021, -0.009, 0.740, 0.672)}
@@ -433,17 +433,17 @@ def plot_racetrack_roads(roads, bng, default_scenario, road_id, reverse=False):
         add = True
         xy_def = [edge['middle'][:2] for edge in road_edges]
         dists = [distance(xy_def[i], xy_def[i+1]) for i,p in enumerate(xy_def[:-1])]
-        s = sum(dists)
-        if (s < 200):
-            continue
+        # s = sum(dists)
+        # if (s < 200):
+        #     continue
         for edge in road_edges:
             # if edge['middle'][0] < -250 or edge['middle'][0] > 50 or edge['middle'][1] < 0 or edge['middle'][1] > 300:
-            if edge['middle'][1] < -50 or edge['middle'][1] > 250:
-                add = False
-                break
-            if add:
-                x_temp.append(edge['middle'][0])
-                y_temp.append(edge['middle'][1])
+            # if edge['middle'][1] < -50 or edge['middle'][1] > 250:
+            #     add = False
+            #     break
+            # if add:
+            x_temp.append(edge['middle'][0])
+            y_temp.append(edge['middle'][1])
         if add:
             symb = '{}{}'.format(random.choice(colors), random.choice(symbs))
             plt.plot(x_temp, y_temp, symb, label=road)
@@ -452,14 +452,14 @@ def plot_racetrack_roads(roads, bng, default_scenario, road_id, reverse=False):
         a = bng.get_road_edges(r)
         print(r, a[0]['middle'])
     plt.plot([sp['pos'][0]], [sp['pos'][1]], "bo")
-    plt.legend()
+    plt.legend(ncol=5)
     plt.show()
     plt.pause(0.001)
 
 
-def road_analysis(bng, road_id):
+def road_analysis(bng, default_scenario, road_id):
     global centerline, roadleft, roadright
-    plot_racetrack_roads(bng.scenario.get_roads(), bng)
+    # plot_racetrack_roads(bng.scenario.get_roads(),  bng, default_scenario, road_id)
     print(f"Getting road {road_id}...")
     edges = bng.scenario.get_road_edges(road_id)
     actual_middle = [edge['middle'] for edge in edges]
@@ -484,9 +484,9 @@ def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road(spawn, bng, road_id="7982"):
+def create_ai_line_from_road(spawn, bng, default_scenario,road_id="7982"):
     line = []; points = []; point_colors = []; spheres = []; sphere_colors = []
-    middle = road_analysis(bng, road_id)
+    middle = road_analysis(bng, default_scenario, road_id)
     middle_end = middle[:3]
     middle = middle[3:]
     middle.extend(middle_end)
@@ -530,11 +530,11 @@ def plot_input(timestamps, input, input_type, run_number=0):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
+def create_ai_line_from_road_with_interpolation(spawn, bng, default_scenario, road_id):
     global centerline, remaining_centerline, centerline_interpolated, actual_middle
     line = []; points = []; point_colors = []; spheres = []; sphere_colors = []; traj = []
     print("Performing road analysis...")
-    actual_middle, adjusted_middle = road_analysis(bng, road_id)
+    actual_middle, adjusted_middle = road_analysis(bng, default_scenario, road_id)
     # plt.plot([i[0] for i in actual_middle], [i[1] for i in actual_middle])
     # plt.show()
     print(f"{actual_middle[0]=}, {actual_middle[-1]=}")
@@ -562,10 +562,10 @@ def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
             count += 1
     # set up debug line
     for i,p in enumerate(actual_middle[:-1]):
-        points.append([p[0], p[1], p[2]])
-        point_colors.append([0, 1, 0, 0.1])
-        spheres.append([p[0], p[1], p[2], 0.25])
-        sphere_colors.append([1, 0, 0, 0.8])
+        points.append((p[0], p[1], p[2]))
+        point_colors.append((0, 1, 0, 0.1))
+        spheres.append((p[0], p[1], p[2]))
+        sphere_colors.append((1, 0, 0, 0.8))
         count += 1
     print("spawn point:{}".format(spawn))
     print("beginning of script:{}".format(middle[0]))
@@ -576,9 +576,11 @@ def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
     for i in range(4):
         centerline.extend(copy.deepcopy(centerline))
         remaining_centerline.extend(copy.deepcopy(remaining_centerline))
-    bng.add_debug_line(points, point_colors,
-                       spheres=spheres, sphere_colors=sphere_colors,
-                       cling=True, offset=0.1)
+    # bng.scenario.add_debug_line(points, point_colors,
+    #                    spheres=spheres, sphere_colors=sphere_colors,
+    #                    cling=True, offset=0.1)
+    bng.debug.add_spheres(spheres, [0.25 for i in spheres], sphere_colors, cling=True, offset=0.1)
+    bng.debug.add_polyline(points, [0, 0, 0, 0.1], cling=True, offset=0.1)
     return line, bng
 
 # track is approximately 12.50m wide
@@ -596,7 +598,7 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     random.seed(1703)
     print(road_id)
     # beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
-    beamng = BeamNGpy("localhost", port, home='C:/Users/Meriel/Documents/BeamNG.tech.v0.21.3.0', user='C:/Users/Meriel/Documents/BeamNG.tech')
+    beamng = BeamNGpy("localhost", port, home='F:/BeamNG.tech.v0.27.1.0', user='C:/Users/Meriel/Documents/BeamNG.tech')
     beamng.open(launch=True)
     bng = beamng
 
@@ -615,10 +617,8 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     bng.scenario.start()
 
     vehicle = setup_sensors(bng, vehicle, img_dims, fov=fov)
-    ai_line, bng = create_ai_line_from_road_with_interpolation(spawn, bng, road_id)
+    ai_line, bng = create_ai_line_from_road_with_interpolation(spawn, bng, default_scenario, road_id)
     bng.pause()
-    assert vehicle.skt
-    # bng.resume()
     return vehicle, bng, scenario
 
 def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, reverse=False, vehicle_model='etk800', run_number=0,
@@ -685,7 +685,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         sensors = bng.poll_sensors(vehicle)
         image = sensors['front_cam']['colour'].convert('RGB') #.resize((240,135))
         image_seg = sensors['front_cam']['annotation'].convert('RGB')
-        image = fisheye_inv(image)
+        # image = fisheye_inv(image)
         cv2.imshow('car view', np.array(image)[:, :, ::-1])
         cv2.waitKey(1)
         total_imgs += 1
@@ -909,9 +909,9 @@ def main():
     img_dims = (240,135) # (120,67) # (240,135) # (480, 270)
     reverse = False
     default_scenario = 'automation_test_track' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
-    road_id = "8185" # "8185" # "9039" #"12930" # "10988"
+    road_id = "12004" # "8185" # "9039" #"12930" # "10988"
     seg = None
-    fov = 75
+    fov = 51
     # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
     # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
