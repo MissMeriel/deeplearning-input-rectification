@@ -1,0 +1,20 @@
+model_name='H:/GitHub/DAVE2-Keras/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur.pt'
+total_samples=82193
+NB_EPOCH=100
+lr=0.0001
+BATCH_SIZE=64
+optimizer=Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.0001
+    weight_decay: 0
+)
+final_loss=0.0016514382092282175
+device=device(type='cuda')
+robustification=True
+noise_level=20
+dataset_moments={'shape': (82193,), 'mean': 0.06363934590999319, 'median': 0.0214500761715904, 'var': 0.09110829658751617, 'skew': 0.986863207321877, 'kurtosis': 3.4242534463939487, 'max': 1.0, 'min': -1.0}
+time_to_train=88633.38790512085
+dirs=['H:\\BeamNG_DeepBillboard_dataset2/training_runs_hirochi_raceway-startingline_7755samples-S9SIPZ', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-driftcourse2_5000samples-6CVWGF', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-driftcourse2_5000samples-EQ4A5B', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-driftcourse2_5000samples-U63MLW', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-driftcourse2_6231samples-LSC763', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-driftcourse2_937samples-GVKV5N', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-racetrackstartinggate_25000samples-CGE51Y', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-racetrackstartinggate_25000samples3', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_industrial-racetrackstartinggate_5000samples-69KUOC', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_utah-westhighway-tunnel_25000samples-X9QMS6', 'H:\\BeamNG_DeepBillboard_dataset2/training_runs_utah-westhighway2_25000samples-EEVXUR']

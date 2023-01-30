@@ -34,7 +34,7 @@ from wand.image import Image as WandImage
 # globals
 integral, prev_error = 0.0, 0.0
 overall_throttle_setpoint = 40
-setpoint = overall_throttle_setpoint #50.0 #53.3 #https://en.wikipedia.org/wiki/Speed_limits_by_country
+setpoint = overall_throttle_setpoint
 lanewidth = 3.75 #2.25
 centerline = []
 centerline_interpolated = []
@@ -45,7 +45,7 @@ episode_steps = 0
 interventions = 0
 training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
 
-steer_integral=0; steer_prev_error=0; steer_prev_setpoint = 0
+steer_integral, steer_prev_error = 0., 0.
 
 
 # positive angle is to the right / clockwise
@@ -538,18 +538,13 @@ def plot_input(timestamps, input, input_type, run_number=0):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
+def create_ai_line_from_road_with_interpolation(spawn, bng, road_id, close_loop=False):
     global centerline, remaining_centerline, centerline_interpolated, actual_middle
     line = []; points = []; point_colors = []; spheres = []; sphere_colors = []; traj = []
     print("Performing road analysis...")
     actual_middle, adjusted_middle = road_analysis(bng, road_id)
-    # plt.plot([i[0] for i in actual_middle], [i[1] for i in actual_middle])
-    # plt.show()
-    print(f"{actual_middle[0]=}, {actual_middle[-1]=}")
-    middle_end = adjusted_middle[:3]
-    middle = adjusted_middle[3:]
-    temp = [list(spawn['pos'])]; temp.extend(middle); middle = temp
-    middle.extend(middle_end)
+    # print(f"{actual_middle[0]=}, {actual_middle[-1]=}")
+    middle = adjusted_middle
     remaining_centerline = copy.deepcopy(middle)
     timestep = 0.1; elapsed_time = 0; count = 0
     # set up adjusted centerline
@@ -581,21 +576,17 @@ def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
     # centerline = copy.deepcopy(traj)
     remaining_centerline = copy.deepcopy(traj)
     centerline_interpolated = copy.deepcopy(traj)
-    for i in range(4):
-        centerline.extend(copy.deepcopy(centerline))
-        remaining_centerline.extend(copy.deepcopy(remaining_centerline))
+    # plt.plot([i[0] for i in centerline_interpolated], [i[1] for i in centerline_interpolated])
+    # plt.title("centerline interpolated")
+    # plt.show()
+    if close_loop:
+        for i in range(4):
+            centerline.extend(copy.deepcopy(centerline))
+            remaining_centerline.extend(copy.deepcopy(remaining_centerline))
     bng.add_debug_line(points, point_colors,
                        spheres=spheres, sphere_colors=sphere_colors,
                        cling=True, offset=0.1)
     return line, bng
-
-# track is approximately 12.50m wide
-# car is approximately 1.85m wide
-# def has_car_left_track(vehicle_pos, vehicle_bbox, bng):
-#     global centerline_interpolated
-#     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle_pos)
-#     dist = min(distance_from_centerline)
-#     return dist > 5.0, dist
 
 def add_qr_cubes(scenario):
     global qr_positions
@@ -698,7 +689,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
     damage = None; overall_damage = 0.0
     final_img = None
     total_loops = 0; total_imgs = 0; total_predictions = 0
-    start_time = sensors['timer']['time']
+
     outside_track = False
     distance_from_center = 0
     current_interventions = 0
@@ -706,11 +697,11 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
     writedir = f"{default_scenario}-{road_id}-lap-test"
     if not os.path.isdir(writedir):
         os.mkdir(writedir)
-    # with open(f"{writedir}/data.txt", "w") as f:
-    # f.write(f"IMG,PREDICTION,POSITION,ORIENTATION,KPH,STEERING_ANGLE_CURRENT\n")
     while kph < 35:
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
+        last_time = sensors['timer']['time']
+        start_time = sensors['timer']['time']
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         vehicle.control(throttle=1., steering=0., brake=0.0)
         bng.step(1, wait=True)
@@ -720,22 +711,23 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         sensors = bng.poll_sensors(vehicle)
         image = sensors['front_cam']['colour'].convert('RGB') #.resize((240,135))
         image_seg = sensors['front_cam']['annotation'].convert('RGB')
-        image = fisheye_inv(image)
+        # image = fisheye_inv(image)
         cv2.imshow('car view', np.array(image)[:, :, ::-1])
         cv2.waitKey(1)
         total_imgs += 1
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
-        dt = (sensors['timer']['time'] - start_time) - runtime
+        dt = sensors['timer']['time'] - last_time
         # image = cv2.resize(np.array(image), (135,240))
         processed_img = model.process_image(image).to(device)
         prediction = model(processed_img)
-        setpoint_steering = float(prediction.item())
-        curr_steering = steering = sensors['electrics']['steering_input']
-        outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
+        # setpoint_steering = float(prediction.item())
+        curr_steering = sensors['electrics']['steering']
+        # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
         expert_action, cartocl_theta_deg = get_expert_action(vehicle)
-        if abs(expert_action - setpoint_steering) > 0.05:
-            setpoint_steering = expert_action
-            current_interventions += 1
+        # if abs(expert_action - setpoint_steering) > 0.01:
+        #     print("Using expert action")
+        setpoint_steering = expert_action
+        current_interventions += 1
 
         current_episode_steps += 1
         runtime = sensors['timer']['time'] - start_time
@@ -769,7 +761,8 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
             print("New damage={}, exiting...".format(new_damage))
             print(f"Try next spawn: {centerline[m+5]}")
             break
-        bng.step(1, wait=True)
+        last_time = sensors['timer']['time']
+        bng.step(1, wait=False)
 
         # if distance(spawn['pos'], vehicle.state['pos']) < 5 and runtime > 10:
         # dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
@@ -780,7 +773,6 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
             break
 
         outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
-        # print(f"{distance_from_center=:.1f}")
         if outside_track:
             print("Left track, exiting...")
             break
@@ -795,56 +787,72 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
     return results
 
 def steering_PID(curr_steering,  steer_setpoint, dt):
-    global steer_integral, steer_prev_error, steer_prev_setpoint
-    print(f"steering_PID({curr_steering:3f}, {steer_setpoint:3f}, {dt:3f})")
+    global steer_integral, steer_prev_error
+    print(f"steering_PID({curr_steering:3f},{steer_setpoint:3f},{dt:3f}) {steer_prev_error:3f}")
     if dt == 0:
         print(f"{dt=}")
         return 0
-    kp = 0.75; ki = 0.0; kd = 0.05 # experimental to handle curves slightly better
-    # kp = 0.167; ki = 0.11; kd = 0.14
+    # kp = 0.75; ki = 0.01; kd = 0.2 # decent
+    # kp = 0.8125; ki = 0.00; kd = 0.2 # decent on straight
+    kp = .05; ki = 0.00; kd = 0.0
     error = steer_setpoint - curr_steering
     deriv = (error - steer_prev_error) / dt
-    integral = steer_integral + error * dt
-    w = kp * error + ki * integral + kd * deriv
+    steer_integral = steer_integral + error * dt
+    w = kp * error + ki * steer_integral + kd * deriv
     steer_prev_error = error
-    print("returning ", w+curr_steering)
-    return w #+ curr_steering
+    print(f"returning {w:3f}")
+    return w
 
 def get_expert_action(vehicle):
-    distance_from_centerline = dist_from_line(centerline_interpolated, vehicle.state['pos'])
+    distance_from_centerline = dist_from_line(centerline_interpolated, vehicle.state['front'])
     dist = min(distance_from_centerline)
+    coming_index = 4
     i = np.where(distance_from_centerline == dist)[0][0]
-    print(centerline_interpolated[i], vehicle.state['pos'])
-    next_point = centerline_interpolated[(i + 3) % len(centerline_interpolated)]
-    # theta_deg = get_angle_between_3_points_atan2(vehicle.state['pos'][0:2], next_point[0:2], vehicle.state['front'][0:2])
+    next_point = centerline_interpolated[(i + coming_index) % len(centerline_interpolated)]
+    # next_point2 = centerline_interpolated[(i + coming_index*2) % len(centerline_interpolated)]
     theta = angle_between(vehicle.state, next_point)
-    action = theta / (2*math.pi)
-    print(f"{action=:.3f}, {theta=:.3f}")
+    action = theta / (2 * math.pi)
+    fig, ax = plt.subplots()
+    plt.plot([vehicle.state["front"][0], vehicle.state["pos"][0]], [vehicle.state["front"][1], vehicle.state["pos"][1]], label="car")
+    plt.plot([j[0] for j in centerline_interpolated[i+coming_index:i+20]], [j[1] for j in centerline_interpolated[i+coming_index:i+20]], label="centerline")
+    plt.plot(next_point[0], next_point[1], 'ro', label="next waypoint")
+    plt.legend()
+    ax = plt.gca()
+    ax.set_aspect('equal', adjustable='box')
+    fig.canvas.draw()
+    img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8,sep='')
+    img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    cv2.imshow("plot", img)
+    cv2.waitKey(1)
+    plt.close('all')
     return action, theta
 
-def angle_between(vehicle_state, next_waypoint):
+def angle_between(vehicle_state, next_waypoint, next_waypoint2=None):
     vehicle_angle = math.atan2(vehicle_state['front'][1]-vehicle_state['pos'][1], vehicle_state['front'][0]-vehicle_state['pos'][0])
-    waypoint_angle = math.atan2((next_waypoint[1]-vehicle_state['front'][1]), (next_waypoint[0]-vehicle_state['front'][0]))
-    inner_angle = -(waypoint_angle - vehicle_angle)
+    if next_waypoint2 is not None:
+        waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]),(next_waypoint2[0] - next_waypoint[0]))
+    else:
+        waypoint_angle = math.atan2((next_waypoint[1]-vehicle_state['front'][1]), (next_waypoint[0]-vehicle_state['front'][0]))
+    inner_angle = vehicle_angle - waypoint_angle
     return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
 def get_angle_between_3_points_atan2(A, B, C):
     result = math.atan2(C[1] - A[1], C[0] - A[0]) - math.atan2(B[1] - A[1], B[0] - A[0])
-    print(f"Angle between:{math.degrees(result)}")
     result = math.atan2(math.sin(result), math.cos(result))
     result = math.degrees(result)
     if result > 180:
         result = result - 360
     elif result < -180:
         result = result + 360
-    print(f"Normalized angle:{result}")
+    # print(f"Normalized angle:{result}")
     return result
 
 # track ~12.50m wide; car ~1.85m wide
 def has_car_left_track(vehicle):
     global centerline_interpolated
     vehicle.update_vehicle()
-    vehicle_pos = vehicle.state['front'] #self.vehicle.state['pos']
+    vehicle_pos = vehicle.state['front']
     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle_pos)
     dist = min(distance_from_centerline)
     i = np.where(distance_from_centerline == dist)[0][0]
@@ -897,22 +905,6 @@ def turn_X_degrees(rot_quat, degrees=90):
     r = R.from_euler('xyz', r, degrees=True)
     return tuple(r.as_quat())
 
-def add_barriers(scenario):
-    barrier_locations = []
-    with open('posefiles/hirochi_barrier_locations.txt', 'r') as f:
-        lines = f.readlines()
-        for i, line in enumerate(lines):
-            line = line.split(' ')
-            pos = line[0].split(',')
-            pos = tuple([float(i) for i in pos])
-            rot_quat = line[1].split(',')
-            rot_quat = tuple([float(j) for j in rot_quat])
-            rot_quat = turn_X_degrees(rot_quat, degrees=-115)
-            # barrier_locations.append({'pos':pos, 'rot_quat':rot_quat})
-            ramp = StaticObject(name='barrier{}'.format(i), pos=pos, rot=None, rot_quat=rot_quat, scale=(1, 1, 1),
-                                shape='levels/Industrial/art/shapes/misc/concrete_road_barrier_a.dae')
-            scenario.add_object(ramp)
-
 def fisheye_wand(image, filename=None):
     with WandImage.from_array(image) as img:
         img.virtual_pixel = 'transparent'
@@ -936,17 +928,17 @@ def fisheye_inv(image):
 
 def main():
     global base_filename, interventions, episode_steps
-    global steer_integral, steer_prev_error, steer_prev_setpoint
-    model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt" # orig model
+    global steer_integral, steer_prev_error
+    model_name = "../models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt" # orig model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    img_dims = (240,135) # (120,67) # (240,135) # (480, 270)
+    img_dims = (240,135) # (96, 54) #  (120,67) # (240,135) # (480, 270)
     reverse = False
-    default_scenario = 'automation_test_track' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
-    road_id = "8185" # "8185" # "9039" #"12930" # "10988"
+    default_scenario = 'west_coast_usa' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
+    road_id = "12930" # "8185" # "9039" #"12930" # "10988"
     seg = None
-    fov = 75
+    fov = 51
     # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
     # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
@@ -970,7 +962,7 @@ def main():
         deviations.append(results['deviation']['mean'])
         interventions.append(results['interventions'])
         episode_steps.append(results['episode_steps'])
-        steer_integral, steer_prev_error, steer_prev_setpoint = 0.0, 0.0, 0.0
+        steer_integral, steer_prev_error= 0.0, 0.0
     print(f"OUT OF 5 RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
           f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
           f"\n\tAverage intervention rate:{(sum(interventions) / sum(episode_steps)):3f}"
