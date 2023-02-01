@@ -837,17 +837,6 @@ def angle_between(vehicle_state, next_waypoint, next_waypoint2=None):
     inner_angle = vehicle_angle - waypoint_angle
     return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
-def get_angle_between_3_points_atan2(A, B, C):
-    result = math.atan2(C[1] - A[1], C[0] - A[0]) - math.atan2(B[1] - A[1], B[0] - A[0])
-    result = math.atan2(math.sin(result), math.cos(result))
-    result = math.degrees(result)
-    if result > 180:
-        result = result - 360
-    elif result < -180:
-        result = result + 360
-    # print(f"Normalized angle:{result}")
-    return result
-
 # track ~12.50m wide; car ~1.85m wide
 def has_car_left_track(vehicle):
     global centerline_interpolated

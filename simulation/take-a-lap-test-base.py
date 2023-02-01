@@ -623,7 +623,7 @@ def add_qr_cubes(scenario):
                                       rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
                 scenario.add_object(box)
 
-def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
+def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
     global base_filename
 
@@ -651,7 +651,7 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     # bng.resume()
     return vehicle, bng, scenario
 
-def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, reverse=False, vehicle_model='etk800', run_number=0,
+def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, reverse=False,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), seg=None):
     global base_filename
     global integral, prev_error, setpoint
@@ -752,7 +752,6 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         final_img = image
         dists = dist_from_line(centerline, vehicle.state['pos'])
         m = np.where(dists==min(dists))[0][0]
-        # print(f"Current nearest: {centerline[m]}")
         print(f"Try next spawn: {centerline[m + 5]}")
         print(f"{vehicle.state['pos']=}\ndistance travelled: {get_distance_traveled(traj):3f}")
         if new_damage > 0.0:
@@ -761,16 +760,13 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
             break
         bng.step(1, wait=True)
 
-        # if distance(spawn['pos'], vehicle.state['pos']) < 5 and runtime > 10:
         dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
         print(f"{dist_to_cutoff=:3f}")
         if distance2D(vehicle.state["pos"], cutoff_point) < 12:
             print("Reached cutoff point, exiting...")
-            reached_start = True
             break
 
         outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], vehicle.get_bbox(), bng)
-        # print(f"{distance_from_center=:.1f}")
         if outside_track:
             print("Left track, exiting...")
             break
@@ -800,7 +796,6 @@ def turn_X_degrees(rot_quat, degrees=90):
     return tuple(r.as_quat())
 
 def add_barriers(scenario):
-    barrier_locations = []
     with open('posefiles/hirochi_barrier_locations.txt', 'r') as f:
         lines = f.readlines()
         for i, line in enumerate(lines):
@@ -810,7 +805,6 @@ def add_barriers(scenario):
             rot_quat = line[1].split(',')
             rot_quat = tuple([float(j) for j in rot_quat])
             rot_quat = turn_X_degrees(rot_quat, degrees=-115)
-            # barrier_locations.append({'pos':pos, 'rot_quat':rot_quat})
             ramp = StaticObject(name='barrier{}'.format(i), pos=pos, rot=None, rot_quat=rot_quat, scale=(1, 1, 1),
                                 shape='levels/Industrial/art/shapes/misc/concrete_road_barrier_a.dae')
             scenario.add_object(ramp)
@@ -820,30 +814,20 @@ def fisheye_wand(image, filename=None):
         img.virtual_pixel = 'transparent'
         img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
         img.alpha_channel = False
-        # img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
         img = np.array(img, dtype='uint8')
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
-        return img
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
 
 def fisheye_inv(image):
     with WandImage.from_array(image) as img:
         img.virtual_pixel = 'transparent'
-        # img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
         img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
-        # return np.array(img)
         img = np.array(img, dtype='uint8')
-        # img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        return img
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
 def main():
     global base_filename
-    # model_name = "../models/weights/dave2-weights/model-tinyimg67x120-DAVE2PytorchModel-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    # model_name = "../models/weights/dave2-weights/model-bigimg270x480-DAVE2PytorchModel-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur-epoch99.pt"
     model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt" # orig model
-    model_name = "../models/weights/dave2-weights/model-DAVE2v3-tinyimg67x120-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    model_name = "../models/baselines/model-DAVE2v3-baseplusRRL-fisheye135x240-Lturn-lr1e4-100epoch-batch64-lossMSE-139Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    model_name = "../models/baselines/model-DAVE2v3-baseplusRRL-fisheye135x240-Rturn-lr1e4-100epoch-batch64-lossMSE-138Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
+    # model_name = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
@@ -852,18 +836,18 @@ def main():
     default_scenario = 'hirochi_raceway' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
     road_id = "9039" # "8185" # "9039" #"12930" # "10988"
     seg = 0
-    fov = 75
+    fov = 51
     # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
     # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
 
-    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
+    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='etk800',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
     distances = []
     deviations = []
     for i in range(5):
-        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, reverse=reverse, vehicle_model='hopper', run_number=i, seg=seg)
+        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg)
         results['distance'] = get_distance_traveled(results['traj'])
         # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
         print(f"\nBASE MODEL USING IMG DIMS {img_dims} RUN {i}:"
