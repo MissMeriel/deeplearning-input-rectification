@@ -36,7 +36,7 @@ centerline = []
 centerline_interpolated = []
 roadleft = []
 roadright = []
-actual_middle = []
+middle = []
 episode_steps = 0
 interventions = 0
 training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
@@ -416,11 +416,13 @@ def dist_from_line(centerline, point):
     dist = lineseg_dists([point[0], point[1]], a, b)
     return dist
 
-def calc_deviation_from_center(centerline, traj):
+def calc_deviation_from_center(traj):
+    global centerline
     dists = []
     for point in traj:
         dist = dist_from_line(centerline, point)
         dists.append(min(dist))
+    print(f"{len(dists)=}\t\t{len(traj)=}")
     stddev = statistics.stdev(dists)
     avg = sum(dists) / len(dists)
     return {"stddev":stddev, "mean":avg}
@@ -473,14 +475,14 @@ def road_analysis(bng, default_scenario, road_id):
     # plot_racetrack_roads(bng.scenario.get_roads(),  bng, default_scenario, road_id)
     print(f"Getting road {road_id}...")
     edges = bng.scenario.get_road_edges(road_id)
-    actual_middle = [edge['middle'] for edge in edges]
+    middle = [edge['middle'] for edge in edges]
     roadleft = [edge['left'] for edge in edges]
     roadright = [edge['right'] for edge in edges]
     width = distance(roadleft[0], roadright[0])
     print(f"\nWidth of road {road_id}={width:3f}\n")
-    adjusted_middle = [np.array(edge['middle']) + (np.array(edge['left']) - np.array(edge['middle']))/4.0 for edge in edges]
-    centerline = actual_middle
-    return actual_middle, adjusted_middle
+    # adjusted_middle = [np.array(edge['middle']) + (np.array(edge['left']) - np.array(edge['middle']))/4.0 for edge in edges]
+    centerline = middle
+    return middle
 
 def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     global centerline, roadleft, roadright
@@ -497,43 +499,6 @@ def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road(spawn, bng, default_scenario,road_id="7982"):
-    line = []; points = []; point_colors = []; spheres = []; sphere_colors = []
-    middle = road_analysis(bng, default_scenario, road_id)
-    middle_end = middle[:3]
-    middle = middle[3:]
-    middle.extend(middle_end)
-    traj = []
-    with open("centerline_lap_data.txt", 'w') as f:
-        for i,p in enumerate(middle[:-1]):
-            f.write("{}\n".format(p))
-            # interpolate at 1m distance
-            if distance(p, middle[i+1]) > 1:
-                y_interp = scipy.interpolate.interp1d([p[0], middle[i+1][0]], [p[1], middle[i+1][1]])
-                num = abs(int(middle[i+1][0] - p[0]))
-                xs = np.linspace(p[0], middle[i+1][0], num=num, endpoint=True)
-                ys = y_interp(xs)
-                for x,y in zip(xs,ys):
-                    traj.append([x,y])
-                    line.append({"x":x, "y":y, "z":p[2], "t":i * 10})
-                    points.append([x, y, p[2]])
-                    point_colors.append([0, 1, 0, 0.1])
-                    spheres.append([x, y, p[2], 0.25])
-                    sphere_colors.append([1, 0, 0, 0.8])
-            else:
-                traj.append([p[0],p[1]])
-                line.append({"x": p[0], "y": p[1], "z": p[2], "t": i * 10})
-                points.append([p[0], p[1], p[2]])
-                point_colors.append([0, 1, 0, 0.1])
-                spheres.append([p[0], p[1], p[2], 0.25])
-                sphere_colors.append([1, 0, 0, 0.8])
-    #         plot_trajectory(traj, "Points on Script So Far")
-    # plot_trajectory(traj, "Planned traj.")
-    bng.add_debug_line(points, point_colors,
-                       spheres=spheres, sphere_colors=sphere_colors,
-                       cling=True, offset=0.1)
-    return line, bng
-
 def plot_input(timestamps, input, input_type, run_number=0):
     plt.plot(timestamps, input)
     plt.xlabel('Timestamps')
@@ -544,52 +509,35 @@ def plot_input(timestamps, input, input_type, run_number=0):
     plt.pause(0.1)
 
 def create_ai_line_from_road_with_interpolation(spawn, default_scenario, road_id):
-    global centerline, remaining_centerline, centerline_interpolated, actual_middle
+    global centerline, centerline_interpolated
     global bng, vehicle, scenario
-    line = []; points = []; point_colors = []; spheres = []; sphere_colors = []; traj = []
+    points,point_colors,spheres,sphere_colors = [],[],[],[]
     print("Performing road analysis...")
-    actual_middle, adjusted_middle = road_analysis(bng, default_scenario, road_id)
+    middle = road_analysis(bng, default_scenario, road_id)
     # plt.plot([i[0] for i in actual_middle], [i[1] for i in actual_middle])
     # plt.show()
-    print(f"{actual_middle[0]=}, {actual_middle[-1]=}")
-    # middle_end = adjusted_middle[:3]
-    # middle = adjusted_middle[3:]
-    # temp = [list(spawn['pos'])]; temp.extend(middle); middle = temp
-    # middle.extend(middle_end)
-    middle = adjusted_middle
-    remaining_centerline = copy.deepcopy(middle)
-    timestep = 0.1; elapsed_time = 0; count = 0
-    # set up adjusted centerline
+    # interpolate at 1m distance
     for i,p in enumerate(middle[:-1]):
-        # interpolate at 1m distance
         if distance(p, middle[i+1]) > 1:
             y_interp = interpolate.interp1d([p[0], middle[i+1][0]], [p[1], middle[i+1][1]])
             num = int(distance(p, middle[i+1]))
             xs = np.linspace(p[0], middle[i+1][0], num=num, endpoint=True)
             ys = y_interp(xs)
             for x,y in zip(xs,ys):
-                traj.append([x,y])
+                centerline_interpolated.append([x,y])
         else:
-            elapsed_time += distance(p, middle[i+1]) / 12
-            traj.append([p[0],p[1]])
-            linedict = {"x": p[0], "y": p[1], "z": p[2], "t": elapsed_time}
-            line.append(linedict)
-            count += 1
+            centerline_interpolated.append([p[0],p[1]])
     # set up debug line
-    for i,p in enumerate(actual_middle[:-1]):
+    for i,p in enumerate(middle[:-1]):
         points.append((p[0], p[1], p[2]))
         point_colors.append((0, 1, 0, 0.1))
         spheres.append((p[0], p[1], p[2]))
         sphere_colors.append((1, 0, 0, 0.8))
-        count += 1
     print("spawn point:{}".format(spawn))
     print("beginning of script:{}".format(middle[0]))
     # plot_trajectory(traj, "Points on Script (Final)", "AI debug line")
-    remaining_centerline = copy.deepcopy(traj)
-    centerline_interpolated = copy.deepcopy(traj)
     bng.debug.add_spheres(spheres, [0.25 for i in spheres], sphere_colors, cling=True, offset=0.25)
     # bng.debug.add_polyline(points, [0, 0, 0, 0.1], cling=True, offset=0.25)
-    return line
 
 def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.tech', port=64956):
@@ -602,7 +550,7 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     vehicle = Vehicle('ego_vehicle', model=vehicle_model, licence='EGO', color=default_color)
 
     spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
-    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
+    scenario.add_vehicle(vehicle, pos=spawn['pos'], rot_quat=spawn['rot_quat'])
 
     scenario.make(bng)
     bng.settings.set_deterministic(steps_per_sec)
@@ -611,15 +559,10 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     bng.scenario.start()
     bng.control.pause()
     front_camera = setup_sensors(img_dims, fov=fov)
-    ai_line = create_ai_line_from_road_with_interpolation(spawn, default_scenario, road_id)
-    bng.pause()
+    create_ai_line_from_road_with_interpolation(spawn, default_scenario, road_id)
     return front_camera
 
-def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, seg=None,
-                 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
-    global integral, prev_error, setpoint
-    global episode_steps, interventions
-    global vehicle, bng, scenario
+def get_cutoff_point(default_scenario, road_id, seg=None):
     if default_scenario == "hirochi_raceway" and road_id == "9039" and seg == 0:
         cutoff_point = [368.466, -206.154, 43.8237]
     elif default_scenario == "automation_test_track" and (road_id == "8185" or road_id == "12004"):
@@ -633,18 +576,25 @@ def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, 
         cutoff_point = [843.6112670898438, 6.58771276473999, 147.01829528808594] # late
     else:
         cutoff_point = [601.547, 53.4482, 43.29]
-    integral, prev_error = 0.0, 0.0
+    return cutoff_point
+
+def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, seg=None,
+                 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+    global integral, prev_error, setpoint
+    global episode_steps, interventions
+    global vehicle, bng, scenario
+    cutoff_point = get_cutoff_point(default_scenario, road_id, seg)
+    integral, prev_error = 0.0, setpoint
     spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
-    bng.scenario.restart()
-    vehicle.teleport(spawn['pos'], spawn['rot_quat'], reset=True)
+    # bng.scenario.restart()
+    # vehicle.teleport(spawn['pos'], spawn['rot_quat'], reset=True)
     scenario.update()
     bng.control.pause()
-    plt.pause(0.01)
     vehicle.sensors.poll()
     sensors = vehicle.sensors
-    wheelspeed = 0.0; kph = 0.; prev_error = setpoint; damage_prev = None; runtime = 0.0
-    kphs = []; traj = []; steering_inputs = []; throttle_inputs = []; timestamps = []
-    damage = None; overall_damage = 0.0
+    wheelspeed = 0.0; kph = 0.; damage_prev = None; runtime = 0.0
+    traj = []; steering_inputs = []; throttle_inputs = []; timestamps = []
+    damage = 0.0
     final_img = None
     total_loops = 0; total_imgs = 0; total_predictions = 0
     start_time = sensors['timer']['time']
@@ -661,7 +611,7 @@ def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, 
         print("steering_input", sensors['electrics']['steering_input'])
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
 
-    while overall_damage <= 0:
+    while damage <= 1.:
         front_cam_data = front_camera.poll()
         image = front_cam_data['colour'].convert('RGB') #.resize((240,135))
         # image_seg = front_cam_data['annotation'].convert('RGB')
@@ -698,32 +648,22 @@ def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, 
         throttle_inputs.append(throttle)
         timestamps.append(runtime)
 
-        damage = sensors['damage']
-        overall_damage = damage["damage"]
-        new_damage = diff_damage(damage, damage_prev)
-        damage_prev = damage
+        damage = sensors['damage']["damage"]
         traj.append(sensors['state']['pos'])
 
-        kphs.append(ms_to_kph(wheelspeed))
         total_loops += 1
-        final_img = image
-        dists = dist_from_line(centerline, sensors['state']['pos'])
+        # final_img = image
+        # dists = dist_from_line(centerline, sensors['state']['pos'])
 
         bng.control.step(1, wait=True)
 
         vehicle.sensors.poll()
         sensors = vehicle.sensors
 
-        if new_damage > 0.0:
-            m = np.where(dists == min(dists))[0][0]
-            print("New damage={}, exiting...".format(new_damage))
-            print(f"Try next spawn: {centerline[m+5]}")
+        if damage > 1.:
+            print("Damage={}, exiting...".format(damage))
             break
 
-
-        # if distance(spawn['pos'], vehicle.state['pos']) < 5 and runtime > 10:
-        # dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
-        # print(f"{dist_to_cutoff=:3f}")
         if distance2D(sensors['state']['pos'], cutoff_point) < 12:
             print("Reached cutoff point, exiting...")
             break
@@ -736,25 +676,23 @@ def run_scenario(front_camera, model, default_scenario, road_id, reverse=False, 
 
     cv2.destroyAllWindows()
 
-    deviation = calc_deviation_from_center(centerline, traj)
-    results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj, 'final_img':final_img, 'deviation':deviation,
+    deviation = calc_deviation_from_center(traj)
+    results = {'runtime': round(runtime,3), 'damage': damage, 'traj':traj, 'final_img':final_img, 'deviation':deviation,
                "interventions":current_interventions, "episode_steps":current_episode_steps}
     return results
 
-def steering_PID(curr_steering,  steer_setpoint, dt):
+def steering_PID(curr_steering, steer_setpoint, dt):
     global steer_integral, steer_prev_error, steer_prev_setpoint
     print(f"steering_PID({curr_steering:3f}, {steer_setpoint:3f}, {dt:3f})")
-    if dt == 0:
-        print(f"{dt=}")
-        return 0
-    kp = 0.75; ki = 0.0; kd = 0.05 # experimental to handle curves slightly better
-    # kp = 0.167; ki = 0.11; kd = 0.14
+    kp = 0.75; ki = 0.0; kd = 0.05
     error = steer_setpoint - curr_steering
-    deriv = (error - steer_prev_error) / dt
+    if dt == 0:
+        deriv = 0.
+    else:
+        deriv = (error - steer_prev_error) / dt
     integral = steer_integral + error * dt
     w = kp * error + ki * integral + kd * deriv
     steer_prev_error = error
-    print("returning ", w+curr_steering)
     return w
 
 def get_expert_action():
@@ -813,12 +751,12 @@ def get_position_relative_to_centerline(front, dist, i, centerdist=1):
         return 2
 
 def get_current_segment_shape(vehicle_pos):
-    global actual_middle
-    distance_from_centerline = dist_from_line(actual_middle, vehicle_pos)
+    global centerline
+    distance_from_centerline = dist_from_line(centerline, vehicle_pos)
     dist = min(distance_from_centerline)
     i = np.where(distance_from_centerline == dist)[0][0]
-    A = np.array(actual_middle[(i + 2) % len(actual_middle)])
-    B = np.array(actual_middle[i])
+    A = np.array(centerline[(i + 2) % len(centerline)])
+    B = np.array(centerline[i])
     C = np.array(roadright[i])
     theta = math.acos(np.vdot(B-A, B-C) / (np.linalg.norm(B-A) * np.linalg.norm(B-C)))
     theta_deg = math.degrees(theta)
@@ -871,7 +809,7 @@ def main():
     global steer_integral, steer_prev_error, steer_prev_setpoint
     global bng, vehicle, scenario
     model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt" # orig model
-    #model_name = "../models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt"
+    model_name = "../models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
@@ -906,6 +844,7 @@ def main():
         interventions.append(results['interventions'])
         episode_steps.append(results['episode_steps'])
         steer_integral, steer_prev_error, steer_prev_setpoint = 0.0, 0.0, 0.0
+        bng.scenario.restart()
     print(f"OUT OF 5 RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
           f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
           f"\n\tAverage intervention rate:{(sum(interventions) / sum(episode_steps)):3f}"
