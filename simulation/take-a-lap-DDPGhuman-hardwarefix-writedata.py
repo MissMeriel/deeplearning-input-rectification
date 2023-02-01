@@ -1,19 +1,15 @@
 import shutil
 import os
 import string
-import cv2
 import random
 import numpy as np
-import matplotlib
-# from matplotlib import pyplot as plt
 import logging
-# from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
-# from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
-
 import time
 import sys
-
 import torch
+import cv2
+import matplotlib
+
 # import torch.nn as nn
 # import torch.optim as optim
 # import torch.nn.functional as F
@@ -26,9 +22,8 @@ import torch
 
 def parse_args():
     import argparse
-    parser = argparse.ArgumentParser(prog='ProgramName',
-                    description='What the program does',
-                    epilog='Text at the bottom of help')
+    parser = argparse.ArgumentParser(prog='ProgramName', description='What the program does',
+                                     epilog='Text at the bottom of help')
     parser.add_argument("-t", '--transformation', type=str,
                         help='transformation type (resinc, resdec, fisheye, or depth)')
     parser.add_argument('-s', '--scenario', type=str,
@@ -51,12 +46,6 @@ sys.path.append(f'{args.path2src}/GitHub/deeplearning-input-rectification/simula
 sys.path.append(f'{args.path2src}/GitHub/BeamNGpy')
 sys.path.append(f'{args.path2src}/GitHub/BeamNGpy/src/')
 sys.path.append(f'{args.path2src}/GitHub/DPT/')
-
-
-# # set up matplotlib
-# is_ipython = 'inline' in matplotlib.get_backend()
-# if is_ipython:
-#     from IPython import display
 
 def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn", transf="fisheye",
                 beamnginstance="BeamNG.research", port=64156):
@@ -87,7 +76,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     from stable_baselines3.common.noise import NormalActionNoise
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.0005 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.005 * np.ones(n_actions))
     model = DDPG(
         "CnnPolicy",
         env,
