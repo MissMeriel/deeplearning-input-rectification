@@ -844,8 +844,7 @@ def main():
 
     vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='etk800',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
-    distances = []
-    deviations = []
+    distances, deviations = [], []
     for i in range(5):
         results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg)
         results['distance'] = get_distance_traveled(results['traj'])

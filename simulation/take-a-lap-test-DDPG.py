@@ -57,7 +57,8 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtest-resdec-straight-{timestr}-{randstr}"
+    testdir = "RLtrain-windy-resdec-max200-0.01eval-2_8-18_48-2ML7OV"
+    newdir = f"RLtest-{testdir}-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -67,8 +68,8 @@ def main():
     from TestEnv import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 54, 96), model="DDPGMLPSingle", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
-                 beamnginstance="BeamNG.researchINSTANCE2", port=64156, scenario="automation_test_track", road_id="8185", reverse=False,
-                 base_model=model_filename, test_model=True, seg=None, transf="fisheye")
+                 beamnginstance="BeamNG.researchINSTANCE2", port=64156, scenario="west_coast_usa", road_id="10988", reverse=False,
+                 base_model=model_filename, test_model=True, seg=1, transf="resdec")
     # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
     # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
     # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
@@ -76,9 +77,9 @@ def main():
     start_time = time.time()
     from stable_baselines3 import DDPG
 
-    model = DDPG.load("F:/RRL-results/RLtrainstraight-resdec-max200-0.05eval-1_25-10_34-3DPMZU/best_model", print_system_info=True)
-    print(model.policy.actor_target.mu)
-    print("\n\n", model.policy.actor.mu)
+    model = DDPG.load(f"F:/RRL-results/{testdir}/best_model", print_system_info=True)
+    # print(model.policy.actor_target.mu)
+    # print("\n\n", model.policy.actor.mu)
     # pred = model.predict(testinput)
     # print(f"{pred=}\t{setpoint=}\t{steer=}")
     start_time = time.time()
@@ -92,13 +93,13 @@ def main():
         obs, reward, done, state = env.step(action)
         crashed = state.get('collision', True)
         if done or crashed:
-            print("Done?", done, "Collision?", state.get('collision', True))
+            # print("Done?", done, "Collision?", state.get('collision', True))
             ep_results = env.get_progress()
             results.append(ep_results)
             obs = env.reset()
             episodes += 1
         if episodes == 5:
-            env.close()
+
             break
         # env.render()
     dists = []
@@ -113,7 +114,7 @@ def main():
           f"\n\tdist travelled:{(sum(dists) / len(dists)):1f}"
           f"\n\tdist from ctrline:{(sum(centerline_dists) / len(centerline_dists)):3f}"
           f"\n\tintervention rate:{frames_adjusted / ep_count:3f}")
-
+    env.close()
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True

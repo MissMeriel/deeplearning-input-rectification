@@ -125,7 +125,7 @@ class CarEnv(gym.Env):
         self.bng.load_scenario(self.scenario)
 
         print("Interpolating centerline...")
-        line = self.create_ai_line_from_road_with_interpolation()
+        self.create_ai_line_from_road_with_interpolation()
 
         print("Starting scenario....")
         self.bng.start_scenario()
@@ -195,6 +195,7 @@ class CarEnv(gym.Env):
             return img
 
     def step(self, action):
+        eval_epsilon = 0.01
         if self.default_scenario == "hirochi_raceway" and self.road_id == "9039" and self.seg == 0:
             cutoff_point = [368.466, -206.154, 43.8237]
         elif self.default_scenario == "automation_test_track" and self.road_id == "8185":
@@ -226,7 +227,7 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-            if abs(action.item()) < 0.05:
+            if abs(action.item()) < eval_epsilon:
                 steer = float(base_model_inf)
                 blackedout = np.zeros(image.shape) # BLACK
                 cv2.imshow("action image", blackedout)
@@ -248,10 +249,15 @@ class CarEnv(gym.Env):
             self.bng.step(1, wait=True)
             obs = self._get_obs()
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-            reward = 0
+
+            # reward = 0
+            # expert_action, cartocl_theta_deg = self.get_expert_action()
+            # reward = self.calc_reward(base_model_inf + action.item(), expert_action)
+            reward = self.calc_reward_onpolicy(outside_track, distance_from_center)
 
             self.episode_steps += 1
-            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 12)
+            # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
+            done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
             self.current_rewards.append(reward)
             return obs, reward, done, self.state
 
@@ -271,10 +277,9 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-            expert_action, cartocl_theta_deg = self.get_expert_action(outside_track, distance_from_center,
-                                                                      leftrightcenter, segment_shape, theta_deg)
+            expert_action, cartocl_theta_deg = self.get_expert_action()
             # evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape, base_model_inf + action.item())
-            evaluation = abs(expert_action - (base_model_inf + action.item())) < 0.05
+            evaluation = abs(expert_action - (base_model_inf + action.item())) < eval_epsilon
             if evaluation:
                 taken_action = base_model_inf + action.item()
                 blackedout = np.ones(image.shape)
@@ -305,7 +310,8 @@ class CarEnv(gym.Env):
             self.f.write(f"{img_filename.split('/')[-1]},{taken_action},{position},{orientation},{kph},{self.car_state['electrics']['steering']},{throttle}\n")
 
             self.episode_steps += 1
-            done = outside_track or self.state["collision"] or (self.distance2D(self.state["pose"], cutoff_point) < 12)
+            # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
+            done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
 
             self.current_rewards.append(reward)
             # print(f"STEP() \n\troad_seg {theta_deg=:.1f}\t car-to-CL theta_deg={cartocl_theta_deg:.1f}\n\texpert_action={expert_action:.3f}\t\t{base_model_inf=:.3f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
@@ -320,18 +326,43 @@ class CarEnv(gym.Env):
         else:
             return -abs(expert_action - agent_action)
 
+    def calc_reward_onpolicy(self, outside_track, distance_from_center):
+        if outside_track or self.state["collision"]:
+            return -5000
+        else:
+            return math.pow(2, 4.0-distance_from_center)
+
     def close(self):
-        try:
-            self.f.close()
-            # self.vehicle.close()
-            self.bng.close()
-            super.close()
-        except:
-            pass
+        self.f.close()
+        # self.vehicle.close()
+        # self.bng.kill_beamng()
+        self.bng.close()
+        # super.close()
+
+    def get_progress(self):
+        dist = self.get_distance_traveled(self.current_trajectory)
+        dist_from_centerline = []
+        for i in self.current_trajectory:
+            distance_from_centerline = self.dist_from_line(self.centerline_interpolated, i)
+            dist_from_centerline.append(min(distance_from_centerline))
+
+        summary = {
+            "episode": self.episode,
+            "rewards": self.current_rewards,
+            "trajectory": self.current_trajectory,
+            "total_steps": self.episode_steps,
+            "frames_adjusted_count": self.frames_adjusted,
+            "dist_from_centerline": dist_from_centerline,
+            "image_shape": self.image_shape,
+            "obs_shape": self.obs_shape,
+            "action_space": self.action_space,
+            "dist_travelled": dist
+        }
+        return summary
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > -1:
+        if self.episode > -1 and len(self.current_trajectory) > 0: #and not self.test_model
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -356,16 +387,18 @@ class CarEnv(gym.Env):
             picklefile = open(f"{self.deflation_pattern}/summary-epi{self.episode:03d}.pickle", 'wb')
             pickle.dump(summary, picklefile)
             picklefile.close()
-
-            print(f"\ttotal distance travelled: {dist:.1f}"
-                  f"\n\ttotal episode reward: {sum(self.current_rewards):.1f}"
-                  f"\n\tavg dist from ctrline: {sum(dist_from_centerline) / len(dist_from_centerline):.3f}"
-                  f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
-                  f"\n\ttotal steps: {self.episode_steps}"
-                  f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
-            self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
-                                save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
-            self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+            try:
+                print(f"\ttotal distance travelled: {dist:.1f}"
+                      f"\n\ttotal episode reward: {sum(self.current_rewards):.1f}"
+                      f"\n\tavg dist from ctrline: {sum(dist_from_centerline) / len(dist_from_centerline):.3f}"
+                      f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
+                      f"\n\ttotal steps: {self.episode_steps}"
+                      f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
+                self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
+                                    save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
+                self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+            except Exception as e:
+                print(e)
 
             # SET UP FOR NEXT EPISODE
             # if self.f is not None:
@@ -432,14 +465,36 @@ class CarEnv(gym.Env):
         else:
             return 0
 
-    def get_expert_action(self, outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg):
-        distance_from_centerline = self.dist_from_line(self.centerline_interpolated, self.vehicle.state['pos'])
+    # def get_expert_action(self, outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg):
+    #     distance_from_centerline = self.dist_from_line(self.centerline_interpolated, self.vehicle.state['pos'])
+    #     dist = min(distance_from_centerline)
+    #     i = np.where(distance_from_centerline == dist)[0][0]
+    #     next_point = self.centerline_interpolated[(i + 3) % len(self.centerline_interpolated)]
+    #     theta_deg = self.get_angle_between_3_points_atan2(self.vehicle.state['pos'][0:2], next_point[0:2], self.vehicle.state['front'][0:2])
+    #     action = theta_deg / 180
+    #     return action, theta_deg
+
+    def get_expert_action(self):
+        distance_from_centerline = self.dist_from_line(self.centerline_interpolated, self.vehicle.state['front'])
         dist = min(distance_from_centerline)
+        coming_index = 4
         i = np.where(distance_from_centerline == dist)[0][0]
-        next_point = self.centerline_interpolated[(i + 3) % len(self.centerline_interpolated)]
-        theta_deg = self.get_angle_between_3_points_atan2(self.vehicle.state['pos'][0:2], next_point[0:2], self.vehicle.state['front'][0:2])
-        action = theta_deg / 180
-        return action, theta_deg
+        next_point = self.centerline_interpolated[(i + coming_index) % len(self.centerline_interpolated)]
+        # next_point2 = centerline_interpolated[(i + coming_index*2) % len(centerline_interpolated)]
+        theta = self.angle_between(self.vehicle.state, next_point)
+        action = theta / (2 * math.pi)
+        return action, theta
+
+    def angle_between(self, vehicle_state, next_waypoint, next_waypoint2=None):
+        vehicle_angle = math.atan2(vehicle_state['front'][1] - vehicle_state['pos'][1],
+                                   vehicle_state['front'][0] - vehicle_state['pos'][0])
+        if next_waypoint2 is not None:
+            waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]), (next_waypoint2[0] - next_waypoint[0]))
+        else:
+            waypoint_angle = math.atan2((next_waypoint[1] - vehicle_state['front'][1]),
+                                        (next_waypoint[0] - vehicle_state['front'][0]))
+        inner_angle = vehicle_angle - waypoint_angle
+        return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
     # track ~12.50m wide; car ~1.85m wide
     def has_car_left_track(self):
@@ -452,13 +507,12 @@ class CarEnv(gym.Env):
         segment_shape, theta_deg = self.get_current_segment_shape(vehicle_pos)
         return dist > 4.0, dist, leftrightcenter, segment_shape, theta_deg
 
-
     def get_current_segment_shape(self, vehicle_pos):
-        distance_from_centerline = self.dist_from_line(self.actual_middle, vehicle_pos)
+        distance_from_centerline = self.dist_from_line(self.centerline, vehicle_pos)
         dist = min(distance_from_centerline)
         i = np.where(distance_from_centerline == dist)[0][0]
-        A = np.array(self.actual_middle[(i + 2) % len(self.actual_middle)])
-        B = np.array(self.actual_middle[i])
+        A = np.array(self.centerline[(i + 2) % len(self.centerline)])
+        B = np.array(self.centerline[i])
         C = np.array(self.roadright[i])
         theta = math.acos(np.vdot(B-A, B-C) / (np.linalg.norm(B-A) * np.linalg.norm(B-C)))
         theta_deg = math.degrees(theta)
@@ -469,7 +523,6 @@ class CarEnv(gym.Env):
         else:
             return 0, theta_deg
 
-
     def get_angle_between_3_points_atan2(self, A, B, C):
         result = math.atan2(C[1] - A[1], C[0] - A[0]) - math.atan2(B[1] - A[1], B[0] - A[0])
         result = math.degrees(result)
@@ -479,30 +532,8 @@ class CarEnv(gym.Env):
             return result + 360
         return result
 
-
-    # solve for gamma where a is the corresponding vertex of gamma
-    def law_of_cosines(self, A, B, C):
-        dist_AB = self.distance2D(A[:2], B[:2])
-        dist_BC = self.distance2D(B[:2], C[:2])
-        dist_AC = self.distance2D(A[:2], C[:2])
-        arccos = math.acos((math.pow(dist_AB, 2) + math.pow(dist_AC, 2) - math.pow(dist_BC, 2)) / (2 * dist_AB * dist_AC))
-        return math.degrees(arccos)
-
-
-    def get_angle_between_3_points(self, A,B,C):
-        A = np.array(A)
-        B = np.array(B)
-        C = np.array(C)
-        x = np.vdot(B-A, B-C)
-        y = np.linalg.norm(B-A)
-        z = np.linalg.norm(B-C)
-        cosine = x / (y * z)
-        theta = math.acos(cosine)
-        return math.degrees(theta)
-
-
-    def distance2D(self, a, b):
-        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+    # def distance2D(self, a, b):
+    #     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
     def get_position_relative_to_centerline(self, dist, i, centerdist=1):
         A = self.centerline_interpolated[i]
@@ -796,35 +827,27 @@ class CarEnv(gym.Env):
             return {'pos': (-9.99082, 580.726, 156.72), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
 
     def create_ai_line_from_road_with_interpolation(self):
-        line,points,point_colors,spheres,sphere_colors, traj = [], [], [], [], [], []
+        points, point_colors, spheres, sphere_colors = [], [], [], []
+        self.centerline_interpolated = []
         self.road_analysis()
-        print("spawn point:{}".format(self.spawn))
-        print(f"{self.actual_middle[0]=}")
-        print(f"{self.actual_middle[-1]=}")
-        elapsed_time = 0
-        for i, p in enumerate(self.actual_middle[:-1]):
-            # interpolate at 1m distance
-            if self.distance(p, self.actual_middle[i+1]) > 1:
-                y_interp = interpolate.interp1d([p[0], self.actual_middle[i+1][0]], [p[1], self.actual_middle[i+1][1]])
-                num = int(self.distance(p, self.actual_middle[i+1]))
-                xs = np.linspace(p[0], self.actual_middle[i+1][0], num=num, endpoint=True)
+        # interpolate centerline at 1m distance
+        for i, p in enumerate(self.centerline[:-1]):
+            if self.distance(p, self.centerline[i+1]) > 1:
+                y_interp = interpolate.interp1d([p[0], self.centerline[i+1][0]], [p[1], self.centerline[i+1][1]])
+                num = int(self.distance(p, self.centerline[i+1]))
+                xs = np.linspace(p[0], self.centerline[i+1][0], num=num, endpoint=True)
                 ys = y_interp(xs)
                 for x,y in zip(xs, ys):
-                    traj.append([x, y])
+                    self.centerline_interpolated.append([x, y])
             else:
-                elapsed_time += self.distance(p, self.actual_middle[i+1]) / 12
-                traj.append([p[0],p[1]])
-                linedict = {"x": p[0], "y": p[1], "z": p[2], "t": elapsed_time}
-                line.append(linedict)
+                self.centerline_interpolated.append([p[0],p[1]])
         # set up debug line
-        for i,p in enumerate(self.actual_middle[:-1]):
+        for p in self.centerline[:-1]:
             points.append([p[0], p[1], p[2]])
             point_colors.append([0, 1, 0, 0.1])
             spheres.append([p[0], p[1], p[2], 0.25])
             sphere_colors.append([1, 0, 0, 0.8])
-        self.centerline_interpolated = copy.deepcopy(traj)
         self.bng.add_debug_line(points, point_colors, spheres=spheres, sphere_colors=sphere_colors, cling=True, offset=0.1)
-        return line
 
     def ms_to_kph(self, wheelspeed):
         return wheelspeed * 3.6
@@ -841,10 +864,9 @@ class CarEnv(gym.Env):
         self.prev_error = error
         return w
 
-    #return distance between two any-dimenisonal points
+    '''return distance between two N-dimensional points'''
     def distance(self, a, b):
         sqr = sum([math.pow(ai-bi, 2) for ai, bi in zip(a,b)])
-        # return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
         return math.sqrt(sqr)
 
     def road_analysis(self):
@@ -852,7 +874,6 @@ class CarEnv(gym.Env):
         # self.get_nearby_racetrack_roads(point_of_in=(-391.0,-798.8, 139.7))
         # self.get_nearby_racetrack_roads(point_of_in=(57.04786682128906, -150.53302001953125, 125.5))
         # self.plot_racetrack_roads()
-
         print(f"Getting road {self.road_id}...")
         edges = self.bng.get_road_edges(self.road_id)
         if self.reverse:
@@ -860,15 +881,14 @@ class CarEnv(gym.Env):
             print(f"new spawn={edges[0]['middle']}")
         else:
             print(f"reversed spawn={edges[-1]['middle']}")
-        self.actual_middle = [edge['middle'] for edge in edges]
+        self.centerline = [edge['middle'] for edge in edges]
         self.roadleft = [edge['left'] for edge in edges]
         self.roadright = [edge['right'] for edge in edges]
-        self.adjusted_middle = [edge['middle'] for edge in edges]
-        self.centerline = self.actual_middle
+        # self.adjusted_middle = [edge['middle'] for edge in edges]
+        # self.centerline = self.actual_middle
 
     def plot_racetrack_roads(self):
         roads = self.bng.get_roads()
-        print("got roads")
         sp = self.spawn_point()
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
         symbs = ['-', '--', '-.', ':', '.', ',', 'v', 'o', '1', ]
@@ -876,11 +896,12 @@ class CarEnv(gym.Env):
             road_edges = self.bng.get_road_edges(road)
             if len(road_edges) < 100:
                 continue
+            if self.distance(road_edges['left'][0], road_edges['left'][0]) < 5:
+                continue
             x_temp, y_temp = [], []
             xy_def = [edge['middle'][:2] for edge in road_edges]
             dists = [self.distance(xy_def[i], xy_def[i + 1]) for i, p in enumerate(xy_def[:-1])]
             s = sum(dists)
-
             if (s < 500) or s > 800:
                 continue
             for edge in road_edges:
@@ -935,11 +956,7 @@ class CarEnv(gym.Env):
     def dist_from_line(self, centerline, point):
         a = [x[0:2] for x in centerline[:-1]]
         b = [x[0:2] for x in centerline[1:]]
-        # a = np.array(a)
-        # b = np.array(b)
-        # print(f"{a.shape=}\t{b.shape=}")
-        dist = self.lineseg_dists(point[0:2], np.array(a), np.array(b))
-        return dist
+        return self.lineseg_dists(point[0:2], np.array(a), np.array(b))
 
     def lineseg_dists(self, p, a, b):
         """Cartesian distance from point to line segment
@@ -1031,175 +1048,5 @@ class CarEnv(gym.Env):
             means = torch.cat((torch.ones(19) * means[0], means))
             plt.plot(means.numpy(), '--')
         plt.legend()
-        # plt.pause(0.001)  # pause a bit so that plots are updated
-        # if is_ipython:
-        #     display.clear_output(wait=True)
-        #     display.display(plt.gcf())
-
         if save:
             plt.savefig(f"{title}/training_performance.jpg")
-
-    def add_qr_cubes(self, scenario, qrbox_filename='posefiles/qr_box_locations.txt'):
-        global qr_positions
-        qr_positions = []
-        with open(qrbox_filename, 'r') as f:
-            lines = f.readlines()
-            for i, line in enumerate(lines):
-                line = line.split(' ')
-                pos = line[0].split(',')
-                pos = tuple([float(i) for i in pos])
-                rot_quat = line[1].split(',')
-                rot_quat = tuple([float(j) for j in rot_quat])
-                qr_positions.append([copy.deepcopy(pos), copy.deepcopy(rot_quat)])
-                box = ScenarioObject(oid='qrbox_{}'.format(i), name='qrbox2', otype='BeamNGVehicle', pos=pos, rot=None,
-                                     rot_quat=rot_quat, scale=(1, 1, 1), JBeam='qrbox2', datablock="default_vehicle")
-                scenario.add_object(box)
-
-    # with warp
-    def overlay_transparent(self, img1, img2, corners):
-        import kornia
-        print(f"{img1.shape=}") # img1.shape=(135, 240, 3)
-        print(f"{img2.shape=}") # img2.shape=(1, 1)
-        orig = torch.from_numpy(img1[None]).permute(0, 3, 1, 2) / 255.0
-        pert = torch.from_numpy(img2).permute(0, 3, 1, 2) / 255.0 # determined by observation space high and low
-
-        _, c, h, w = _, *pert_shape = pert.shape
-        _, *orig_shape = orig.shape
-        patch_coords = corners[None]
-        src_coords = np.tile(
-            np.array(
-                [
-                    [
-                        [0.0, 0.0],
-                        [w - 1.0, 0.0],
-                        [0.0, h - 1.0],
-                        [w - 1.0, h - 1.0],
-                    ]
-                ]
-            ),
-            (len(patch_coords), 1, 1),
-        )
-        src_coords = torch.from_numpy(src_coords).float()
-        patch_coords = torch.from_numpy(patch_coords).float()
-
-        # build the transforms to and from image patches
-        try:
-            perspective_transforms = kornia.geometry.transform.get_perspective_transform(src_coords, patch_coords)
-        except Exception as e:
-            print(f"{e=}")
-            print(f"{src_coords=}")
-            print(f"{patch_coords=}")
-
-        perturbation_warp = kornia.geometry.transform.warp_perspective(
-            pert,
-            perspective_transforms,
-            dsize=orig_shape[1:],
-            mode="nearest",
-            align_corners=True
-        )
-        mask_patch = torch.ones(1, *pert_shape)
-        warp_masks = kornia.geometry.transform.warp_perspective(
-            mask_patch, perspective_transforms, dsize=orig_shape[1:],
-            mode="nearest",
-            align_corners=True
-        )
-        perturbed_img = orig * (1 - warp_masks)
-        perturbed_img += perturbation_warp * warp_masks
-        return (perturbed_img.permute(0, 2, 3, 1).numpy()[0] * 255).astype(np.uint8)
-
-    # uses contour detection
-    # @ignore_warnings
-    def get_qr_corners_from_colorseg_image(self, image):
-        from skimage import util
-        image = np.array(image)
-        # cv2.imshow('colorseg', image)
-        # cv2.waitKey(1)
-        # hsv mask image
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        light_color = (50, 230, 0)  # (50, 235, 235) #(0, 200, 0)
-        dark_color = (90, 256, 256)  # (70, 256, 256) #(169, 256, 256)
-        mask = cv2.inRange(hsv_image, light_color, dark_color)
-        image = cv2.bitwise_and(image, image, mask=mask)
-
-        # convert image to inverted greyscale
-        R, G, B = image[:, :, 0], image[:, :, 1], image[:, :, 2]
-        imgGray = 0.2989 * R + 0.5870 * G + 0.1140 * B
-        inverted_img = util.invert(imgGray)
-        inverted_img = np.uint8(inverted_img)
-        inverted_img = 255 - inverted_img
-        inverted_img = cv2.GaussianBlur(inverted_img, (3, 3), 0)  # 9
-
-        # contour detection
-        ret, thresh = cv2.threshold(inverted_img, 150, 255, cv2.THRESH_BINARY)
-        contours, hierarchy = cv2.findContours(image=thresh, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
-
-        if contours == [] or np.array(contours).shape[0] < 2:
-            return [[[0, 0], [0, 0], [0, 0], [0, 0]]], None
-        else:
-            epsilon = 0.1 * cv2.arcLength(np.float32(contours[1]), True)
-            approx = cv2.approxPolyDP(np.float32(contours[1]), epsilon, True)
-
-            contours = np.array([c[0] for c in contours[1]])
-            approx = [c[0] for c in approx]
-            if len(approx) < 4:
-                return [[[0, 0], [0, 0], [0, 0], [0, 0]]], None
-
-            def sortClockwise(approx):
-                xs = [a[0] for a in approx]
-                ys = [a[1] for a in approx]
-                center = [int(sum(xs) / len(xs)), int(sum(ys) / len(ys))]
-
-                def sortFxnX(e):
-                    return e[0]
-
-                def sortFxnY(e):
-                    return e[1]
-
-                approx = list(approx)
-                approx.sort(key=sortFxnX)
-                midpt = int(len(approx) / 2)
-                leftedge = list(approx[:midpt])
-                rightedge = list(approx[midpt:])
-                leftedge.sort(key=sortFxnY)
-                rightedge.sort(key=sortFxnY)
-                approx = [leftedge[0], leftedge[1], rightedge[1], rightedge[0]]
-                return approx, leftedge, rightedge, center
-
-            approx, le, re, center = sortClockwise(approx)
-            for i, c in enumerate(le):
-                cv2.circle(image, tuple([int(x) for x in c]), radius=1, color=(100 + i * 20, 0, 0), thickness=2)  # blue
-            for i, c in enumerate(re):
-                cv2.circle(image, tuple([int(x) for x in c]), radius=1, color=(0, 0, 100 + i * 20), thickness=2)  # blue
-            cv2.circle(image, tuple(center), radius=1, color=(203, 192, 255), thickness=2)  # lite pink
-            if len(approx) > 3:
-                cv2.circle(image, tuple([int(x) for x in approx[0]]), radius=1, color=(0, 255, 0), thickness=2)  # green
-                cv2.circle(image, tuple([int(x) for x in approx[2]]), radius=1, color=(0, 0, 255), thickness=2)  # red
-                cv2.circle(image, tuple([int(x) for x in approx[3]]), radius=1, color=(255, 255, 255),
-                           thickness=2)  # white
-                cv2.circle(image, tuple([int(x) for x in approx[1]]), radius=1, color=(147, 20, 255),
-                           thickness=2)  # pink
-
-            keypoints = [[tuple(approx[0]), tuple(approx[3]),
-                          tuple(approx[1]), tuple(approx[2])]]
-            return keypoints, image
-
-    def get_progress(self):
-        dist = self.get_distance_traveled(self.current_trajectory)
-        dist_from_centerline = []
-        for i in self.current_trajectory:
-            distance_from_centerline = self.dist_from_line(self.centerline_interpolated, i)
-            dist_from_centerline.append(min(distance_from_centerline))
-
-        summary = {
-            "episode": self.episode,
-            "rewards": self.current_rewards,
-            "trajectory": self.current_trajectory,
-            "total_steps": self.episode_steps,
-            "frames_adjusted_count": self.frames_adjusted,
-            "dist_from_centerline": dist_from_centerline,
-            "image_shape": self.image_shape,
-            "obs_shape": self.obs_shape,
-            "action_space": self.action_space,
-            "dist_travelled": dist
-        }
-        return summary

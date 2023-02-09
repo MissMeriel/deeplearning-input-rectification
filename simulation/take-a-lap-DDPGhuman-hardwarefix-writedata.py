@@ -6,9 +6,9 @@ import numpy as np
 import logging
 import time
 import sys
-import torch
-import cv2
-import matplotlib
+# import torch
+# import cv2
+# import matplotlib
 
 # import torch.nn as nn
 # import torch.optim as optim
@@ -52,22 +52,24 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"F:/RRL-results/RLtrain{label}-{transf}-max200-0.05eval-{timestr}-{randstr}"
+    newdir = f"F:/RRL-results/RLtrain-{label}-{transf}-max200-0.01eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedata.py", newdir)
-    newdir_eval = f"F:/RRL-results/RLtrain{label}-{transf}-max200-0.05eval-eval-{timestr}-{randstr}"
+    newdir_eval = f"F:/RRL-results/RLtrain-{label}-{transf}-max200-0.01eval-eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir_eval)
 
     from DDPGHumanenv4writedata import CarEnv
+    policytype = "CnnPolicy"
+    noise_sigma = 0.000025
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model="DDPGMLPSingle", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
+    env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance=beamnginstance, port=port, scenario=scenario, road_id=road_id, reverse=False,
                  base_model=model_filename, test_model=False, seg=seg, transf=transf)
 
-    eval_env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model="DDPGMLPSingle", filepathroot=newdir_eval, beamngpath='C:/Users/Meriel/Documents',
+    eval_env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir_eval, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance='BeamNG.researchINSTANCE4', port=64956, scenario=scenario, road_id=road_id, reverse=False,
                  base_model=model_filename, test_model=False, seg=seg, transf=transf)
 
@@ -76,9 +78,9 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     from stable_baselines3.common.noise import NormalActionNoise
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.005 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=noise_sigma * np.ones(n_actions))
     model = DDPG(
-        "CnnPolicy",
+        policytype,
         env,
         action_noise=action_noise,
         learning_rate=0.001,
@@ -96,8 +98,6 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     callbacks = []
     eval_callback = EvalCallback(
         eval_env,
-        callback_on_new_best=callback_max_episodes,
-        callback_after_eval=callback_max_episodes,
         n_eval_episodes=5,
         best_model_save_path=f"{newdir}",
         log_path=f"{newdir}",

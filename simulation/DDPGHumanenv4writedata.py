@@ -195,6 +195,7 @@ class CarEnv(gym.Env):
             return img
 
     def step(self, action):
+        eval_epsilon = 0.01
         if self.default_scenario == "hirochi_raceway" and self.road_id == "9039" and self.seg == 0:
             cutoff_point = [368.466, -206.154, 43.8237]
         elif self.default_scenario == "automation_test_track" and self.road_id == "8185":
@@ -226,7 +227,7 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-            if abs(action.item()) < 0.05:
+            if abs(action.item()) < eval_epsilon:
                 steer = float(base_model_inf)
                 blackedout = np.zeros(image.shape) # BLACK
                 cv2.imshow("action image", blackedout)
@@ -248,9 +249,14 @@ class CarEnv(gym.Env):
             self.bng.step(1, wait=True)
             obs = self._get_obs()
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-            reward = 0
+
+            # reward = 0
+            # expert_action, cartocl_theta_deg = self.get_expert_action()
+            # reward = self.calc_reward(base_model_inf + action.item(), expert_action)
+            reward = self.calc_reward_onpolicy(outside_track, distance_from_center)
 
             self.episode_steps += 1
+            # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
             done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
             self.current_rewards.append(reward)
             return obs, reward, done, self.state
@@ -273,7 +279,7 @@ class CarEnv(gym.Env):
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             expert_action, cartocl_theta_deg = self.get_expert_action()
             # evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape, base_model_inf + action.item())
-            evaluation = abs(expert_action - (base_model_inf + action.item())) < 0.05
+            evaluation = abs(expert_action - (base_model_inf + action.item())) < eval_epsilon
             if evaluation:
                 taken_action = base_model_inf + action.item()
                 blackedout = np.ones(image.shape)
@@ -304,6 +310,7 @@ class CarEnv(gym.Env):
             self.f.write(f"{img_filename.split('/')[-1]},{taken_action},{position},{orientation},{kph},{self.car_state['electrics']['steering']},{throttle}\n")
 
             self.episode_steps += 1
+            # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
             done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
 
             self.current_rewards.append(reward)
@@ -319,12 +326,18 @@ class CarEnv(gym.Env):
         else:
             return -abs(expert_action - agent_action)
 
+    def calc_reward_onpolicy(self, outside_track, distance_from_center):
+        if outside_track or self.state["collision"]:
+            return -5000
+        else:
+            return math.pow(2, 4.0-distance_from_center)
+
     def close(self):
         self.f.close()
-        self.vehicle.close()
-        self.bng.kill_beamng()
+        # self.vehicle.close()
+        # self.bng.kill_beamng()
         self.bng.close()
-        super.close()
+        # super.close()
 
     def get_progress(self):
         dist = self.get_distance_traveled(self.current_trajectory)
@@ -349,7 +362,7 @@ class CarEnv(gym.Env):
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > -1 and not self.test_model:
+        if self.episode > -1 and len(self.current_trajectory) > 0: #and not self.test_model
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -374,16 +387,18 @@ class CarEnv(gym.Env):
             picklefile = open(f"{self.deflation_pattern}/summary-epi{self.episode:03d}.pickle", 'wb')
             pickle.dump(summary, picklefile)
             picklefile.close()
-
-            print(f"\ttotal distance travelled: {dist:.1f}"
-                  f"\n\ttotal episode reward: {sum(self.current_rewards):.1f}"
-                  f"\n\tavg dist from ctrline: {sum(dist_from_centerline) / len(dist_from_centerline):.3f}"
-                  f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
-                  f"\n\ttotal steps: {self.episode_steps}"
-                  f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
-            self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
-                                save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
-            self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+            try:
+                print(f"\ttotal distance travelled: {dist:.1f}"
+                      f"\n\ttotal episode reward: {sum(self.current_rewards):.1f}"
+                      f"\n\tavg dist from ctrline: {sum(dist_from_centerline) / len(dist_from_centerline):.3f}"
+                      f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
+                      f"\n\ttotal steps: {self.episode_steps}"
+                      f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
+                self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
+                                    save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
+                self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+            except Exception as e:
+                print(e)
 
             # SET UP FOR NEXT EPISODE
             # if self.f is not None:
