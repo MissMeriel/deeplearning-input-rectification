@@ -44,7 +44,7 @@ actual_middle = []
 episode_steps = 0
 interventions = 0
 training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
-
+topo_id = None
 steer_integral, steer_prev_error = 0., 0.
 
 
@@ -312,9 +312,8 @@ def spawn_point(default_scenario, road_id, reverse=False, seg=1):
         return {'pos': (-10.0, 580.73, 156.8), 'rot': None, 'rot_quat': (-0.0067, 0.0051, 0.6231, 0.7821)}
 
 def setup_sensors(vehicle, img_dims, fov=51):
-    # Set up sensors
     fov = fov # 60 works for full lap #63 breaks on hairpin turn
-    resolution = img_dims #(240, 135) #(400,225) #(320, 180) #(1280,960) #(512, 512)
+    resolution = img_dims
     pos = (-0.5, 0.38, 1.3)
     direction = (0, 1.0, 0)
     front_camera = Camera(pos, direction, fov, resolution,
@@ -354,8 +353,7 @@ def diff_damage(damage, damage_prev):
     else:
         return damage['damage'] - damage_prev['damage']
 
-# takes in 3D array of sequential [x,y]
-# produces plot
+''' takes in 3D array of sequential [x,y] '''
 def plot_deviation(trajectories, model, deflation_pattern, centerline):
     i = 0; x = []; y = []
     for point in centerline:
@@ -619,10 +617,9 @@ def add_qr_cubes(scenario):
                                       rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
                 scenario.add_object(box)
 
-def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
+def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
     global base_filename
-
     random.seed(1703)
     setup_logging()
     print(road_id)
@@ -647,7 +644,7 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     # bng.resume()
     return vehicle, bng, scenario
 
-def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, reverse=False, vehicle_model='etk800', run_number=0,
+def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, transf="None", reverse=False, vehicle_model='etk800', run_number=0,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), seg=None):
     global base_filename
     global integral, prev_error, setpoint
@@ -665,35 +662,31 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         cutoff_point = [843.6112670898438, 6.58771276473999, 147.01829528808594] # late
     else:
         cutoff_point = [601.547, 53.4482, 43.29]
-    integral = 0.0
-    prev_error = 0.0
+
     bng.restart_scenario()
     # collect overhead view of setup
     # freecams = scenario.render_cameras()
     # plt.title("freecam")
     # plt.imshow(freecams['eagles_eye_cam']["colour"].convert('RGB'))
     # freecams['eagles_eye_cam']["colour"].convert('RGB').save("eagles-eye-view.jpg", "JPEG")
-    plt.pause(0.01)
+    # plt.pause(0.01)
 
-    # perturb vehicle
     vehicle.update_vehicle()
     sensors = bng.poll_sensors(vehicle)
-    image = sensors['front_cam']['colour'].convert('RGB')
-    pitch = vehicle.state['pitch'][0]
-    roll = vehicle.state['roll'][0]
-    z = vehicle.state['pos'][2]
-    spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
+    # image = sensors['front_cam']['colour'].convert('RGB')
+    # pitch = vehicle.state['pitch'][0]
+    # roll = vehicle.state['roll'][0]
+    # z = vehicle.state['pos'][2]
+    # spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
 
-    wheelspeed = 0.0; kph = 0.; throttle = 0.0; prev_error = setpoint; damage_prev = None; runtime = 0.0
-    kphs = []; traj = []; steering_inputs = []; throttle_inputs = []; timestamps = []
-    damage = None; overall_damage = 0.0
-    final_img = None
-    total_loops = 0; total_imgs = 0; total_predictions = 0
+    wheelspeed, kph, throttle, integral, runtime, damage = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    prev_error = setpoint
+    kphs, traj, steering_inputs, throttle_inputs, timestamps = [], [], [], [], []
 
-    outside_track = False
-    distance_from_center = 0
-    current_interventions = 0
-    current_episode_steps = 0
+    # outside_track = False
+    # distance_from_center = 0
+    frames_adjusted, episode_steps = 0, 0
+
     writedir = f"{default_scenario}-{road_id}-lap-test"
     if not os.path.isdir(writedir):
         os.mkdir(writedir)
@@ -705,34 +698,47 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         vehicle.control(throttle=1., steering=0., brake=0.0)
         bng.step(1, wait=True)
-    while overall_damage <= 0:
-        # collect images
+    while damage <= 1:
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
-        image = sensors['front_cam']['colour'].convert('RGB') #.resize((240,135))
-        image_seg = sensors['front_cam']['annotation'].convert('RGB')
-        # image = fisheye_inv(image)
+        image = sensors['front_cam']['colour'].convert('RGB')
+
+        if "fisheye" in transf:
+            image = fisheye_inv(image)
+        elif "resdec" in transf or "resinc" in transf:
+            image = image.resize((240,135))
+            # image = cv2.resize(np.array(image), (135,240))
+        elif "depth" in transf:
+            image_seg = sensors['front_cam']['annotation'].convert('RGB')
+
         cv2.imshow('car view', np.array(image)[:, :, ::-1])
         cv2.waitKey(1)
-        total_imgs += 1
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         dt = sensors['timer']['time'] - last_time
-        # image = cv2.resize(np.array(image), (135,240))
+
         processed_img = model.process_image(image).to(device)
-        prediction = model(processed_img)
-        # setpoint_steering = float(prediction.item())
-        curr_steering = sensors['electrics']['steering']
+        base_model_inf = model(processed_img)
+        base_model_inf = float(base_model_inf.item())
+        curr_steering = sensors['electrics']['steering_input']
         # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
         expert_action, cartocl_theta_deg = get_expert_action(vehicle)
-        # if abs(expert_action - setpoint_steering) > 0.01:
-        #     print("Using expert action")
-        setpoint_steering = expert_action
-        current_interventions += 1
+        # print(f"action={expert_action=:.3f}\t\ttheta{math.degrees(cartocl_theta_deg)=:.3f}")
+        evaluation = abs(expert_action - base_model_inf) < 0.01
+        if False:
+            setpoint_steering = base_model_inf
+            blackedout = np.ones(image.shape)
+            blackedout[:, :, :2] = blackedout[:, :, :2] * 0
+            cv2.imshow("action image", blackedout)  # red
+            cv2.waitKey(1)
+        else:
+            setpoint_steering = expert_action
+            cv2.imshow("action image", np.zeros(image.shape))  # black
+            cv2.waitKey(1)
+            frames_adjusted += 1
 
-        current_episode_steps += 1
+        episode_steps += 1
         runtime = sensors['timer']['time'] - start_time
 
-        total_predictions += 1
         if abs(setpoint_steering) > 0.15:
             setpoint = 30
         else:
@@ -744,32 +750,21 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         throttle_inputs.append(throttle)
         timestamps.append(runtime)
 
-        damage = sensors['damage']
-        overall_damage = damage["damage"]
-        new_damage = diff_damage(damage, damage_prev)
-        damage_prev = damage
+        damage = sensors['damage']["damage"]
         vehicle.update_vehicle()
         traj.append(vehicle.state['pos'])
 
         kphs.append(ms_to_kph(wheelspeed))
-        total_loops += 1
-        final_img = image
-        dists = dist_from_line(centerline, vehicle.state['pos'])
+        # dists = dist_from_line(centerline, vehicle.state['pos'])
 
-        if new_damage > 0.0:
-            m = np.where(dists == min(dists))[0][0]
-            print("New damage={}, exiting...".format(new_damage))
-            print(f"Try next spawn: {centerline[m+5]}")
+        if damage > 1.0:
+            print(f"Damage={damage:.3f}, exiting...")
             break
         last_time = sensors['timer']['time']
         bng.step(1, wait=False)
 
-        # if distance(spawn['pos'], vehicle.state['pos']) < 5 and runtime > 10:
-        # dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
-        # print(f"{dist_to_cutoff=:3f}")
         if distance2D(vehicle.state["pos"], cutoff_point) < 12:
             print("Reached cutoff point, exiting...")
-            # reached_start = True
             break
 
         outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
@@ -780,27 +775,30 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
     cv2.destroyAllWindows()
 
     deviation = calc_deviation_from_center(centerline, traj)
-    results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj, 'pitch': round(pitch,3),
-               'roll':round(roll,3), "z":round(z,3), 'final_img':final_img, 'deviation':deviation,
-               "interventions":current_interventions, "episode_steps":current_episode_steps
+    results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj,
+               'deviation':deviation, "interventions":frames_adjusted, "episode_steps":episode_steps
                }
     return results
 
 def steering_PID(curr_steering,  steer_setpoint, dt):
-    global steer_integral, steer_prev_error
-    print(f"steering_PID({curr_steering:3f},{steer_setpoint:3f},{dt:3f}) {steer_prev_error:3f}")
+    global steer_integral, steer_prev_error, topo_id
+    # print(f"steering_PID({curr_steering:3f},{steer_setpoint:3f},{dt:3f}) {steer_prev_error:3f}")
     if dt == 0:
-        print(f"{dt=}")
+        # print(f"{dt=}")
         return 0
     # kp = 0.75; ki = 0.01; kd = 0.2 # decent
     # kp = 0.8125; ki = 0.00; kd = 0.2 # decent on straight
-    kp = .05; ki = 0.00; kd = 0.0
+    if "windy" in topo_id:
+        # kp = .4; ki = 0.00; kd = 0.03
+        kp = .5; ki = 0.001; kd = 0.1
+    else:
+        kp = 0.75; ki = 0.01; kd = 0.2  # decent
     error = steer_setpoint - curr_steering
     deriv = (error - steer_prev_error) / dt
     steer_integral = steer_integral + error * dt
     w = kp * error + ki * steer_integral + kd * deriv
     steer_prev_error = error
-    print(f"returning {w:3f}")
+    # print(f"returning {w:3f}")
     return w
 
 def get_expert_action(vehicle):
@@ -829,7 +827,8 @@ def get_expert_action(vehicle):
     return action, theta
 
 def angle_between(vehicle_state, next_waypoint, next_waypoint2=None):
-    vehicle_angle = math.atan2(vehicle_state['front'][1]-vehicle_state['pos'][1], vehicle_state['front'][0]-vehicle_state['pos'][0])
+    # vehicle_angle = math.atan2(vehicle_state['front'][1]-vehicle_state['pos'][1], vehicle_state['front'][0]-vehicle_state['pos'][0])
+    vehicle_angle = math.atan2(vehicle_state['front'][1] - vehicle_state['pos'][1], vehicle_state['front'][0] - vehicle_state['pos'][0])
     if next_waypoint2 is not None:
         waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]),(next_waypoint2[0] - next_waypoint[0]))
     else:
@@ -894,12 +893,11 @@ def turn_X_degrees(rot_quat, degrees=90):
     r = R.from_euler('xyz', r, degrees=True)
     return tuple(r.as_quat())
 
-def fisheye_wand(image, filename=None):
+def fisheye_wand(image):
     with WandImage.from_array(image) as img:
         img.virtual_pixel = 'transparent'
         img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
         img.alpha_channel = False
-        # img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
         img = np.array(img, dtype='uint8')
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
         return img
@@ -907,40 +905,53 @@ def fisheye_wand(image, filename=None):
 def fisheye_inv(image):
     with WandImage.from_array(image) as img:
         img.virtual_pixel = 'transparent'
-        # img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
         img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
-        # return np.array(img)
         img = np.array(img, dtype='uint8')
-        # img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         return img
 
+def get_topo(topo_id):
+    if "windy" in topo_id:
+        default_scenario = "west_coast_usa"; road_id = "10988"; seg = 1
+    elif "straight" in topo_id:
+        default_scenario = "automation_test_track"; road_id = "8185"; seg = None
+    elif "Rturn" in topo_id:
+        default_scenario="hirochi_raceway"; road_id="9039"; seg=0
+    elif "Lturn" in topo_id:
+        default_scenario = "west_coast_usa"; road_id = "12930"; seg = None
+    return default_scenario, road_id, seg
+
+def get_transf(transf_id):
+    if transf_id is None:
+        img_dims = (240,135); fov = 51; transf = "None"
+    elif "fisheye" in transf_id:
+        img_dims = (240,135); fov=75; transf = "fisheye"
+    elif "resdec" in transf_id:
+        img_dims = (96, 54); fov = 51; transf = "resdec"
+    elif "resinc" in transf_id:
+        img_dims = (480,270); fov = 51; transf = "resinc"
+    elif "depth" in transf_id:
+        img_dims = (240, 135); fov = 51; transf = "depth"
+    return img_dims, fov, transf
+
 def main():
     global base_filename, interventions, episode_steps
-    global steer_integral, steer_prev_error
-    model_name = "../models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt" # orig model
+    global steer_integral, steer_prev_error, topo_id
+    model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    img_dims = (240,135) # (96, 54) #  (120,67) # (240,135) # (480, 270)
-    reverse = False
-    default_scenario = 'west_coast_usa' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
-    road_id = "12930" # "8185" # "9039" #"12930" # "10988"
-    seg = None
-    fov = 51
-    # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
-    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
-    # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
-    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
+    topo_id= "windy"
+    transf_id = "fisheye"
+    runs = 5
+    default_scenario, road_id, seg = get_topo(topo_id)
+    img_dims, fov, transf = get_transf(transf_id)
 
-    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
+    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, transf=transf, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
-    distances = []
-    deviations = []
-    episode_steps = []
-    interventions = []
-    for i in range(5):
-        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, reverse=reverse, vehicle_model='hopper', run_number=i, seg=seg)
+    distances, deviations, all_episode_steps, interventions = [], [], [], []
+    for i in range(runs):
+        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, transf=transf, vehicle_model='hopper', run_number=i, seg=seg)
         results['distance'] = get_distance_traveled(results['traj'])
         # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
         print(f"\nEVALUATOR + BASE MODEL + NEW CAMERA + INV TRANSF, RUN {i}:"
@@ -950,15 +961,16 @@ def main():
         distances.append(results['distance'])
         deviations.append(results['deviation']['mean'])
         interventions.append(results['interventions'])
-        episode_steps.append(results['episode_steps'])
-        steer_integral, steer_prev_error= 0.0, 0.0
-    print(f"OUT OF 5 RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
+        all_episode_steps.append(results['episode_steps'])
+        steer_integral, steer_prev_error = 0.0, 0.0
+    print(f"OUT OF {runs} RUNS:"
+          f"\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
           f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
-          f"\n\tAverage intervention rate:{(sum(interventions) / sum(episode_steps)):3f}"
+          f"\n\tAverage intervention rate:{(sum(interventions) / sum(all_episode_steps)):3f}"
           f"\n\t{distances=}"
           f"\n\t{deviations=}"
           f"\n\t{interventions=}"
-          f"\n\t{episode_steps=}")
+          f"\n\t{all_episode_steps=}")
     bng.close()
 
 

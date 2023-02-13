@@ -18,8 +18,6 @@ import PIL
 import sys
 sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/DAVE2-Keras')
 from DAVE2pytorch import DAVE2PytorchModel, DAVE2v3
-# import VAEsteer, VAE, VAEbasic
-# from VAEsteer import *
 # sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/superdeepbillboard')
 sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/BeamNGpy')
 sys.path.append(f'/mnt/c/Users/Meriel/Documents/GitHub/BeamNGpy/src/')
@@ -689,7 +687,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
 
     wheelspeed = 0.0; kph = 0.; throttle = 0.0; prev_error = setpoint; damage_prev = None; runtime = 0.0
     kphs = []; traj = []; steering_inputs = []; throttle_inputs = []; timestamps = []
-    damage = None; overall_damage = 0.0
+    damage = 0.0
     final_img = None
     total_loops = 0; total_imgs = 0; total_predictions = 0
     start_time = sensors['timer']['time']
@@ -706,19 +704,20 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         vehicle.control(throttle=1., steering=0., brake=0.0)
         bng.step(1, wait=True)
-    while overall_damage <= 0:
+    while damage <= 1:
         # collect images
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
-        image = sensors['front_cam']['colour'].convert('RGB') #.resize((240,135))
+        image = sensors['front_cam']['colour'].convert('RGB')
         image_seg = sensors['front_cam']['annotation'].convert('RGB')
+        # image = image.resize((240,135))
+        # image = cv2.resize(np.array(image), (135,240))
         # image = fisheye_inv(image)
         cv2.imshow('car view', np.array(image)[:, :, ::-1])
         cv2.waitKey(1)
         total_imgs += 1
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         dt = (sensors['timer']['time'] - start_time) - runtime
-        # image = cv2.resize(np.array(image), (135,240))
         processed_img = model.process_image(image).to(device)
         prediction = model(processed_img)
         steering = float(prediction.item())
@@ -740,10 +739,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         throttle_inputs.append(throttle)
         timestamps.append(runtime)
 
-        damage = sensors['damage']
-        overall_damage = damage["damage"]
-        new_damage = diff_damage(damage, damage_prev)
-        damage_prev = damage
+        damage = sensors['damage']["damage"]
         vehicle.update_vehicle()
         traj.append(vehicle.state['pos'])
 
@@ -752,16 +748,16 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         final_img = image
         dists = dist_from_line(centerline, vehicle.state['pos'])
         m = np.where(dists==min(dists))[0][0]
-        print(f"Try next spawn: {centerline[m + 5]}")
-        print(f"{vehicle.state['pos']=}\ndistance travelled: {get_distance_traveled(traj):3f}")
-        if new_damage > 0.0:
-            print("New damage={}, exiting...".format(new_damage))
+        # print(f"Try next spawn: {centerline[m + 5]}")
+        # print(f"{vehicle.state['pos']=}\ndistance travelled: {get_distance_traveled(traj):3f}")
+        if damage > 1.0:
+            print(f"Damage={damage:.3f}, exiting...")
             print(f"Try next spawn: {centerline[m+5]}")
             break
         bng.step(1, wait=True)
 
-        dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
-        print(f"{dist_to_cutoff=:3f}")
+        # dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
+        # print(f"{dist_to_cutoff=:3f}")
         if distance2D(vehicle.state["pos"], cutoff_point) < 12:
             print("Reached cutoff point, exiting...")
             break
@@ -824,29 +820,49 @@ def fisheye_inv(image):
         img = np.array(img, dtype='uint8')
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
+def get_topo(topo_id):
+    if "windy" in topo_id:
+        default_scenario = "west_coast_usa"; road_id = "10988"; seg = 1
+    elif "straight" in topo_id:
+        default_scenario = "automation_test_track"; road_id = "8185"; seg = None
+    elif "Rturn" in topo_id:
+        default_scenario="hirochi_raceway"; road_id="9039"; seg=0
+    elif "Lturn" in topo_id:
+        default_scenario = "west_coast_usa"; road_id = "12930"; seg = None
+    return default_scenario, road_id, seg
+
+def get_transf(transf_id):
+    if transf_id is None:
+        img_dims = (240,135); fov = 51; transf = "None"
+    elif "fisheye" in transf_id:
+        img_dims = (240,135); fov=75; transf = "fisheye"
+    elif "resdec" in transf_id:
+        img_dims = (96, 54); fov = 51; transf = "resdec"
+    elif "resinc" in transf_id:
+        img_dims = (480,270); fov = 51; transf = "resinc"
+    elif "depth" in transf_id:
+        img_dims = (240, 135); fov = 51; transf = "depth"
+    return img_dims, fov, transf
+
 def main():
     global base_filename
     model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt" # orig model
+    model_name = "../models/retrained-lighterblur-noflip-fixednoise/model-fixnoise-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt"
     # model_name = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    img_dims = (240,135) # (120,67) # (240,135) # (480, 270)
-    reverse = False
-    default_scenario = 'hirochi_raceway' # 'hirochi_raceway' #'west_coast_usa' 'automation_test_track' 'industrial'
-    road_id = "9039" # "8185" # "9039" #"12930" # "10988"
-    seg = 0
-    fov = 51
-    # main(obs_shape=(3, 270, 480), scenario="hirochi_raceway", road_id="9039", seg=0, label="Rturn")
-    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="12930", seg=None, label="Lturn")
-    # main(obs_shape=(3, 270, 480), scenario="automation_test_track", road_id="8185", seg=None, label="straight")
-    # main(obs_shape=(3, 270, 480), scenario="west_coast_usa", road_id="10988", seg=1, label="windy")
+    topo_id= "Rturn"
+    transf_id = None
+    default_scenario, road_id, seg = get_topo(topo_id)
+    img_dims, fov, transf = get_transf(transf_id)
 
-    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='etk800',
+    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
     distances, deviations = [], []
-    for i in range(5):
-        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, reverse=reverse, seg=seg)
+    runs = 50
+    for i in range(runs):
+        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, seg=seg)
         results['distance'] = get_distance_traveled(results['traj'])
         # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
         print(f"\nBASE MODEL USING IMG DIMS {img_dims} RUN {i}:"
@@ -854,7 +870,7 @@ def main():
               f"\n\tavg dist from center={results['deviation']['mean']}")
         distances.append(results['distance'])
         deviations.append(results['deviation']['mean'])
-    print(f"OUT OF 5 RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
+    print(f"OUT OF {runs} RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
           f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
           f"\n\t{distances=}"
           f"\n\t{deviations:}")
