@@ -1,37 +1,26 @@
 import os
-import string
 import cv2
 import random
 import numpy as np
-import time
-import matplotlib
-from matplotlib import pyplot as plt
-import logging
+import string
 from beamngpy import BeamNGpy, Scenario, Vehicle, StaticObject, ScenarioObject
 from beamngpy.sensors import Camera, GForces, Electrics, Damage, Timer
-
-import scipy.misc
-import copy
-import torch
+import PIL
+# import scipy.misc
+# import copy
+import time
+import logging
 import torchvision.transforms as transforms
-import statistics, math
+import math
 from scipy.spatial.transform import Rotation as R
 from scipy import interpolate
-import PIL
 import time
-
 import torch
-# import torch.nn as nn
-# import torch.optim as optim
-# import torch.nn.functional as F
 import torchvision.transforms as T
-
 from wand.image import Image
-
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-
 import pickle
 
 '''
@@ -49,8 +38,6 @@ if is_ipython:
 
 import gym
 from gym import spaces
-# from airgym.envs.airsim_env import AirSimEnv
-
 
 # noinspection PyUnreachableCode
 class CarEnv(gym.Env):
@@ -59,10 +46,13 @@ class CarEnv(gym.Env):
 
     def __init__(self, image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DDPG", filepathroot=".", beamngpath="C:/Users/Meriel/Documents",
                  beamnginstance="BeamNG.research", port=64356, scenario="west_coast_usa", road_id="12146", reverse=False,
-                 base_model=None, test_model=False, seg=None, transf=None):
+                 base_model=None, test_model=False, seg=None, transf=None, topo="straight", eval_eps=0.05):
         super(CarEnv, self).__init__()
         self.start_time = time.time()
         self.transf = transf
+        self.topo=topo
+        self.eval_eps=eval_eps
+        self.test_eps=eval_eps
         self.f = None
         self.ep_dir = None
         self.seg = seg
@@ -77,8 +67,8 @@ class CarEnv(gym.Env):
         self.default_scenario = scenario
         self.road_id = road_id
         self.reverse = reverse
-        self.integral = 0.0
-        self.prev_error = 0.0
+        self.integral, self.prev_error = 0.0, 0.0
+        self.steer_integral, self.steer_prev_error = 0.0, 0.0
         self.overall_throttle_setpoint = 40
         self.setpoint = self.overall_throttle_setpoint
         self.lanewidth = 3.75  # 2.25
@@ -91,57 +81,35 @@ class CarEnv(gym.Env):
         self.all_rewards, self.current_rewards = [], []
         self.actions, self.base_model_inf = [], []
         self.image_shape = image_shape
-        self.steps_per_sec = 30
+        self.steps_per_sec = 15
         self.runtime = 0.0
         self.episode = -1
         random.seed(1703)
         #setup_logging()
         self.model = model
-        self.deflation_pattern = filepathroot
+        self.filepathroot = filepathroot
         beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
 
         self.scenario = Scenario(self.default_scenario, 'RL_Agent-train')
         self.vehicle = Vehicle('ego_vehicle', model="hopper", licence='EGO', color="green")
-        self.obs_shape = obs_shape #(3, 54, 96) #(self.image_shape[0], int(self.image_shape[1] / 4), int(self.image_shape[2] / 4))
+        self.obs_shape = obs_shape
 
         self.setup_sensors()
         self.spawn = self.spawn_point()
 
         self.scenario.add_vehicle(self.vehicle, pos=self.spawn['pos'], rot=None, rot_quat=self.spawn['rot_quat'])
 
-        # setup free camera
-        # cam_pos = (973.684363136209, -854.1390707377659, self.spawn['pos'][2] + 500)
-        # eagles_eye_cam = Camera(cam_pos, #(0.013892743289471, -0.015607489272952, -1.39813470840454, 0.91656774282455),
-        #                         (self.spawn['rot_quat'][0], self.spawn['rot_quat'][1], -1.39813470840454, 0.91656774282455),
-        #                         fov=90, resolution=(1500, 1500),
-        #                         colour=True, depth=False, annotation=False)
-        # self.scenario.add_camera(eagles_eye_cam, "eagles_eye_cam")
-
         self.scenario.make(beamng)
         self.bng = beamng.open(launch=True)
-
         self.bng.set_deterministic()
         self.bng.set_steps_per_second(self.steps_per_sec)
         self.bng.load_scenario(self.scenario)
-
-        print("Interpolating centerline...")
         self.create_ai_line_from_road_with_interpolation()
-
-        print("Starting scenario....")
         self.bng.start_scenario()
-        print("Pausing BeamNG...")
         self.bng.pause()
-
-        print(f"midpoint={self.centerline_interpolated[int(len(self.centerline_interpolated)/2)]}")
-
-        # freecams = self.scenario.render_cameras()
-        # freecams['eagles_eye_cam']["colour"].convert('RGB').save(f"eagles-eye-view-{self.default_scenario}-{self.road_id}.jpg", "JPEG")
         assert self.vehicle.skt
         ###########################################################################
         self.observation_space = spaces.Box(0, 255, shape=self.obs_shape, dtype=np.uint8)
-        self.viewer = None
-
-        self.start_ts = 0
         self.state = {
             # "image": np.zeros(self.obs_shape[1:]),
             # "prev_image": np.zeros(self.obs_shape[1:]),
@@ -149,7 +117,6 @@ class CarEnv(gym.Env):
             "prev_pose": np.zeros(3),
             "collision": False,
         }
-
         self.image = None
         self.car_state = None
 
@@ -188,25 +155,21 @@ class CarEnv(gym.Env):
     def fisheye_inv(self, image):
         with Image.from_array(image) as img:
             img.virtual_pixel = 'transparent'
-            # img.distort('barrel', (0.1, 0.0, -0.05, 1.0))
             img.distort('barrel_inverse', (0.0, 0.0, -0.5, 1.5))
             img = np.array(img)
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             return img
 
     def step(self, action):
-        eval_epsilon = 0.01
         if self.default_scenario == "hirochi_raceway" and self.road_id == "9039" and self.seg == 0:
             cutoff_point = [368.466, -206.154, 43.8237]
         elif self.default_scenario == "automation_test_track" and self.road_id == "8185":
-            # cutoff_point = [-44.8323, -256.138, 120.186] # 200m
-            cutoff_point = [56.01722717285156, -272.89007568359375, 120.56710052490234]  # 100m
+            cutoff_point = [56.017, -272.890, 120.567]  # 100m
         elif self.default_scenario == "west_coast_usa" and self.road_id == "12930":
-            cutoff_point = [-296.55999755859375, -730.234130859375, 136.71339416503906]
+            cutoff_point = [-296.560, -730.234, 136.713]
         elif self.default_scenario == "west_coast_usa" and self.road_id == "10988" and self.seg == 1:
-            # cutoff_point = [843.5116577148438, 5.83634090423584, 147.02598571777344] # a little too early
-            # cutoff_point = [843.5073852539062, 6.2438249588012695, 147.01889038085938] # middle
-            cutoff_point = [843.6112670898438, 6.58771276473999, 147.01829528808594]  # late
+            # cutoff_point = [843.507, 6.244, 147.019] # middle
+            cutoff_point = [843.611, 6.588, 147.018]  # late
         else:
             cutoff_point = [601.547, 53.4482, 43.29]
         if self.test_model:
@@ -227,7 +190,7 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-            if abs(action.item()) < eval_epsilon:
+            if abs(action.item()) < self.test_eps:
                 steer = float(base_model_inf)
                 blackedout = np.zeros(image.shape) # BLACK
                 cv2.imshow("action image", blackedout)
@@ -248,7 +211,7 @@ class CarEnv(gym.Env):
             self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
             self.bng.step(1, wait=True)
             obs = self._get_obs()
-            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
+            outside_track, distance_from_center = self.has_car_left_track()
 
             # reward = 0
             # expert_action, cartocl_theta_deg = self.get_expert_action()
@@ -265,6 +228,7 @@ class CarEnv(gym.Env):
             obs = self._get_obs()
             kph = self.ms_to_kph(self.car_state['electrics']['wheelspeed'])
             dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
+            curr_steering = self.car_state['electrics']['steering_input']
             self.runtime = self.car_state['timer']['time'] - self.start_time
             image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
             if self.transf == "fisheye":
@@ -276,10 +240,10 @@ class CarEnv(gym.Env):
             features = self.transform(image)[None]
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
-            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
+            # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             expert_action, cartocl_theta_deg = self.get_expert_action()
             # evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape, base_model_inf + action.item())
-            evaluation = abs(expert_action - (base_model_inf + action.item())) < eval_epsilon
+            evaluation = abs(expert_action - (base_model_inf + action.item())) < self.eval_eps
             if evaluation:
                 taken_action = base_model_inf + action.item()
                 blackedout = np.ones(image.shape)
@@ -287,7 +251,8 @@ class CarEnv(gym.Env):
                 cv2.imshow("action image", blackedout) # red
                 cv2.waitKey(1)
             else:
-                taken_action = expert_action
+                # print(f"{expert_action=:.3f}")
+                taken_action = self.steering_PID(curr_steering, expert_action, dt)
                 cv2.imshow("action image", np.zeros(image.shape)) # black
                 cv2.waitKey(1)
                 self.frames_adjusted += 1
@@ -300,7 +265,7 @@ class CarEnv(gym.Env):
             self.vehicle.control(throttle=throttle, steering=taken_action, brake=0.0)
             self.bng.step(1, wait=True)
             self.vehicle.update_vehicle()
-            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
+            outside_track, distance_from_center = self.has_car_left_track()
             reward = self.calc_reward(base_model_inf + action.item(), expert_action)
 
             position = str(self.state['pose']).replace(",", " ")
@@ -312,7 +277,6 @@ class CarEnv(gym.Env):
             self.episode_steps += 1
             # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
             done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
-
             self.current_rewards.append(reward)
             # print(f"STEP() \n\troad_seg {theta_deg=:.1f}\t car-to-CL theta_deg={cartocl_theta_deg:.1f}\n\texpert_action={expert_action:.3f}\t\t{base_model_inf=:.3f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
             return obs, reward, done, self.state
@@ -334,10 +298,7 @@ class CarEnv(gym.Env):
 
     def close(self):
         self.f.close()
-        # self.vehicle.close()
-        # self.bng.kill_beamng()
         self.bng.close()
-        # super.close()
 
     def get_progress(self):
         dist = self.get_distance_traveled(self.current_trajectory)
@@ -362,7 +323,7 @@ class CarEnv(gym.Env):
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > -1 and len(self.current_trajectory) > 0: #and not self.test_model
+        if self.episode > -1 and len(self.current_trajectory) > 0:
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -382,9 +343,10 @@ class CarEnv(gym.Env):
                 "image_shape":self.image_shape,
                 "obs_shape": self.obs_shape,
                 "action_space": self.action_space,
-                "wall_clock_time": time.time() - self.start_time
+                "wall_clock_time": time.time() - self.start_time,
+                "sim_time": self.runtime
             }
-            picklefile = open(f"{self.deflation_pattern}/summary-epi{self.episode:03d}.pickle", 'wb')
+            picklefile = open(f"{self.filepathroot}/summary-epi{self.episode:03d}.pickle", 'wb')
             pickle.dump(summary, picklefile)
             picklefile.close()
             try:
@@ -394,30 +356,24 @@ class CarEnv(gym.Env):
                       f"\n\tpercent frames adjusted: {self.frames_adjusted / self.episode_steps:.3f}"
                       f"\n\ttotal steps: {self.episode_steps}"
                       f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
-                self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.deflation_pattern+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
-                                    save_path=f"{self.deflation_pattern}/trajs-ep{self.episode}.jpg", start_viz=False)
-                self.plot_durations(self.all_rewards, save=True, title=self.deflation_pattern)
+                self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.filepathroot+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
+                                    save_path=f"{self.filepathroot}/trajs-ep{self.episode}.jpg", start_viz=False)
+                self.plot_durations(self.all_rewards, save=True, title=self.filepathroot)
             except Exception as e:
                 print(e)
 
-            # SET UP FOR NEXT EPISODE
-            # if self.f is not None:
             self.f.close()
-
         self.episode += 1
-
-        self.ep_dir = f"{self.deflation_pattern}/ep{self.episode:03d}"
+        self.ep_dir = f"{self.filepathroot}/ep{self.episode:03d}"
         if not os.path.exists(self.ep_dir):
-            # os.mkdir(self.ep_dir)
             os.makedirs(self.ep_dir)
         self.f = open(f"{self.ep_dir}/data.csv", "w")
         self.f.write(f"filename,steering_input,pos,dir,kph,steering,throttle_input\n")
-
-
         self.episode_steps, self.frames_adjusted = 0, 0
         self.current_trajectory = []
         self.current_rewards = []
         self.integral, self.prev_error = 0.0, 0.0
+        self.steer_integral, self.steer_prev_error = 0.0, 0.0
         self.bng.restart_scenario()
         kph = 0
         while kph < 35:
@@ -477,23 +433,56 @@ class CarEnv(gym.Env):
     def get_expert_action(self):
         distance_from_centerline = self.dist_from_line(self.centerline_interpolated, self.vehicle.state['front'])
         dist = min(distance_from_centerline)
-        coming_index = 4
+        coming_index = 3
         i = np.where(distance_from_centerline == dist)[0][0]
         next_point = self.centerline_interpolated[(i + coming_index) % len(self.centerline_interpolated)]
         # next_point2 = centerline_interpolated[(i + coming_index*2) % len(centerline_interpolated)]
         theta = self.angle_between(self.vehicle.state, next_point)
         action = theta / (2 * math.pi)
+        # fig, ax = plt.subplots()
+        # plt.plot([self.vehicle.state["front"][0], self.vehicle.state["pos"][0]],
+        #          [self.vehicle.state["front"][1], self.vehicle.state["pos"][1]], label="car")
+        # plt.plot(self.vehicle.state["front"][0], self.vehicle.state["front"][1], "ko", label="front")
+        # plt.plot([j[0] for j in self.centerline_interpolated[i + coming_index:i + 20]],
+        #          [j[1] for j in self.centerline_interpolated[i + coming_index:i + 20]], label="centerline")
+        # plt.plot(next_point[0], next_point[1], 'ro', label="next waypoint")
+        # plt.legend()
+        # plt.title(f"{action=:.3f}  deg={math.degrees(theta):.1f}")
+        # ax = plt.gca()
+        # ax.set_aspect('equal', adjustable='box')
+        # fig.canvas.draw()
+        # img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+        # img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # cv2.imshow("get_expert_action", img)
+        # cv2.waitKey(1)
+        # plt.close('all')
         return action, theta
+
+    def angle_between2(self, vehicle_state, next_waypoint, next_waypoint2=None):
+        vehicle_angle = math.atan2(vehicle_state['pos'][1] - vehicle_state['front'][1],
+                                   vehicle_state['pos'][0] - vehicle_state['front'][0])
+        if next_waypoint2 is not None:
+            waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]),
+                                        (next_waypoint2[0] - next_waypoint[0]))
+        else:
+            waypoint_angle = math.atan2((next_waypoint[1] - vehicle_state['front'][1]),
+                                        (next_waypoint[0] - vehicle_state['front'][0]))
+        inner_angle = vehicle_angle - waypoint_angle
+        print(f"wp_angle={math.degrees(waypoint_angle):.1f}  \tvehicle_angle={math.degrees(vehicle_angle):.1f}")
+        return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
     def angle_between(self, vehicle_state, next_waypoint, next_waypoint2=None):
         vehicle_angle = math.atan2(vehicle_state['front'][1] - vehicle_state['pos'][1],
                                    vehicle_state['front'][0] - vehicle_state['pos'][0])
         if next_waypoint2 is not None:
-            waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]), (next_waypoint2[0] - next_waypoint[0]))
+            waypoint_angle = math.atan2((next_waypoint2[1] - next_waypoint[1]),
+                                        (next_waypoint2[0] - next_waypoint[0]))
         else:
             waypoint_angle = math.atan2((next_waypoint[1] - vehicle_state['front'][1]),
                                         (next_waypoint[0] - vehicle_state['front'][0]))
         inner_angle = vehicle_angle - waypoint_angle
+        # print(f"wp_angle={math.degrees(waypoint_angle):.1f}  \tvehicle_angle={math.degrees(vehicle_angle):.1f}")
         return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
     # track ~12.50m wide; car ~1.85m wide
@@ -503,9 +492,9 @@ class CarEnv(gym.Env):
         distance_from_centerline = self.dist_from_line(self.centerline_interpolated, vehicle_pos)
         dist = min(distance_from_centerline)
         i = np.where(distance_from_centerline == dist)[0][0]
-        leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1.5)
-        segment_shape, theta_deg = self.get_current_segment_shape(vehicle_pos)
-        return dist > 4.0, dist, leftrightcenter, segment_shape, theta_deg
+        # leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1.5)
+        # segment_shape, theta_deg = self.get_current_segment_shape(vehicle_pos)
+        return dist > 4.0, dist #, leftrightcenter, segment_shape, theta_deg
 
     def get_current_segment_shape(self, vehicle_pos):
         distance_from_centerline = self.dist_from_line(self.centerline, vehicle_pos)
@@ -532,9 +521,6 @@ class CarEnv(gym.Env):
             return result + 360
         return result
 
-    # def distance2D(self, a, b):
-    #     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
-
     def get_position_relative_to_centerline(self, dist, i, centerdist=1):
         A = self.centerline_interpolated[i]
         B = self.centerline_interpolated[(i + 2) % len(self.centerline_interpolated)]
@@ -548,6 +534,37 @@ class CarEnv(gym.Env):
             return 2
 
     ################################# BEAMNG HELPERS #################################
+
+    # -1 is left turn, 1 is right turn
+    def steering_PID(self, curr_steering, steer_setpoint, dt):
+        if dt == 0:
+            return curr_steering
+        if "winding" in self.topo:
+            # kp = .4; ki = 0.00; kd = 0.03
+            kp = 1.5; ki = 0.00; kd = 0.0
+        elif "straight" in self.topo:
+            kp = 0.8125; ki = 0.00; kd = 0.0  # decent on straight
+        else:
+            kp = 0.75; ki = 0.01; kd = 0.2  # decent
+        error = steer_setpoint - curr_steering
+        deriv = (error - self.steer_prev_error) / dt
+        steer_integral = self.steer_integral + error * dt
+        w = kp * error + ki * steer_integral + kd * deriv
+        # print(f"steering_PID({curr_steering=:.3f}  \tsetpoint={steer_setpoint:.3f}  \t{dt=:.3f})  \tprev_error{self.steer_prev_error:.3f}  \t{w=:.3f}")
+        self.steer_prev_error = error
+        return w
+
+    def throttle_PID(self, kph, dt):
+        kp, ki, kd = 0.19, 0.0001, 0.008
+        error = self.setpoint - kph
+        if dt > 0:
+            deriv = (error - self.prev_error) / dt
+        else:
+            deriv = 0
+        self.integral = self.integral + error * dt
+        w = kp * error + ki * self.integral + kd * deriv
+        self.prev_error = error
+        return w
 
     def setup_sensors(self):
         camera_pos = (-0.5, 0.38, 1.3)
@@ -581,8 +598,6 @@ class CarEnv(gym.Env):
         self.vehicle.attach_sensor('timer', timer)
 
     def spawn_point(self):
-        print(f"{self.default_scenario=}\t{self.road_id=}")
-        lanewidth = 2.75
         if self.default_scenario == 'cliff':
             #return {'pos':(-124.806, 142.554, 465.489), 'rot':None, 'rot_quat':(0, 0, 0.3826834, 0.9238795)}
             return {'pos': (-124.806, 190.554, 465.489), 'rot': None, 'rot_quat': (0, 0, 0.3826834, 0.9238795)}
@@ -852,18 +867,6 @@ class CarEnv(gym.Env):
     def ms_to_kph(self, wheelspeed):
         return wheelspeed * 3.6
 
-    def throttle_PID(self, kph, dt):
-        kp, ki, kd = 0.19, 0.0001, 0.008
-        error = self.setpoint - kph
-        if dt > 0:
-            deriv = (error - self.prev_error) / dt
-        else:
-            deriv = 0
-        self.integral = self.integral + error * dt
-        w = kp * error + ki * self.integral + kd * deriv
-        self.prev_error = error
-        return w
-
     '''return distance between two N-dimensional points'''
     def distance(self, a, b):
         sqr = sum([math.pow(ai-bi, 2) for ai, bi in zip(a,b)])
@@ -872,7 +875,6 @@ class CarEnv(gym.Env):
     def road_analysis(self):
         print("Performing road analysis...")
         # self.get_nearby_racetrack_roads(point_of_in=(-391.0,-798.8, 139.7))
-        # self.get_nearby_racetrack_roads(point_of_in=(57.04786682128906, -150.53302001953125, 125.5))
         # self.plot_racetrack_roads()
         print(f"Getting road {self.road_id}...")
         edges = self.bng.get_road_edges(self.road_id)
@@ -884,8 +886,6 @@ class CarEnv(gym.Env):
         self.centerline = [edge['middle'] for edge in edges]
         self.roadleft = [edge['left'] for edge in edges]
         self.roadright = [edge['right'] for edge in edges]
-        # self.adjusted_middle = [edge['middle'] for edge in edges]
-        # self.centerline = self.actual_middle
 
     def plot_racetrack_roads(self):
         roads = self.bng.get_roads()
@@ -1013,12 +1013,6 @@ class CarEnv(gym.Env):
             i += 1
         plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}', fontdict={'fontsize' : 8})
         plt.legend(fontsize=8)
-        # if start_viz:
-        #     plt.xlim([200,400])
-        #     plt.ylim([-300,-100])
-        # else:
-        #     plt.xlim([-350, 650])
-        #     plt.ylim([-325, 475])
         plt.draw()
         plt.savefig(save_path)
         plt.clf()

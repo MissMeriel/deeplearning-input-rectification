@@ -590,37 +590,6 @@ def has_car_left_track(vehicle_pos, vehicle_bbox, bng):
     dist = min(distance_from_centerline)
     return dist > 5.0, dist
 
-def add_qr_cubes(scenario):
-    global qr_positions
-    qr_positions = []
-    with open(f'posefiles/qr_box_locations-{road_id}-swerve0.txt', 'r') as f:
-        lines = f.readlines()
-        for i, line in enumerate(lines):
-            if "platform=" in line:
-                line = line.replace("platform=", "")
-                line = line.split(' ')
-                pos = line[0].split(',')
-                pos = tuple([float(i) for i in pos])
-                rot_quat = line[1].split(',')
-                rot_quat = tuple([float(j) for j in rot_quat])
-                size= float(line[2])
-                cube = ProceduralCube(name='cube_platform',
-                                      pos=pos,
-                                      rot=None,
-                                      rot_quat=rot_quat,
-                                      size=(2, size, 0.5))
-                scenario.add_procedural_mesh(cube)
-            else:
-                line = line.split(' ')
-                pos = line[0].split(',')
-                pos = tuple([float(i) for i in pos])
-                rot_quat = line[1].split(',')
-                rot_quat = tuple([float(j) for j in rot_quat])
-                qr_positions.append([copy.deepcopy(pos), copy.deepcopy(rot_quat)])
-                box = ScenarioObject(oid='qrbox_{}'.format(i), name='qrbox2', otype='BeamNGVehicle', pos=pos, rot=None,
-                                      rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
-                scenario.add_object(box)
-
 def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
     global base_filename

@@ -617,21 +617,18 @@ def add_qr_cubes(scenario):
                                       rot_quat=rot_quat, scale=(1,1,1), JBeam = 'qrbox2', datablock="default_vehicle")
                 scenario.add_object(box)
 
-def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=30,
+def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
     global base_filename
     random.seed(1703)
     setup_logging()
-    print(road_id)
     beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
-    # beamng = BeamNGpy('localhost', 64256, home='C:/Users/Meriel/Documents/BeamNG.tech.v0.21.3.0', user='C:/Users/Meriel/Documents/BeamNG.tech')
     scenario = Scenario(default_scenario, 'research_test')
     vehicle = Vehicle('ego_vehicle', model=vehicle_model, licence='EGO', color=default_color)
     vehicle = setup_sensors(vehicle, img_dims, fov=fov)
     spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
-    print(default_scenario, road_id, seg, spawn)
+    # print(default_scenario, road_id, seg, spawn)
     scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
-    print(road_id)
     scenario.make(beamng)
     bng = beamng.open(launch=True)
     bng.set_deterministic()
@@ -664,32 +661,18 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
         cutoff_point = [601.547, 53.4482, 43.29]
 
     bng.restart_scenario()
-    # collect overhead view of setup
-    # freecams = scenario.render_cameras()
-    # plt.title("freecam")
-    # plt.imshow(freecams['eagles_eye_cam']["colour"].convert('RGB'))
-    # freecams['eagles_eye_cam']["colour"].convert('RGB').save("eagles-eye-view.jpg", "JPEG")
-    # plt.pause(0.01)
-
     vehicle.update_vehicle()
-    sensors = bng.poll_sensors(vehicle)
-    # image = sensors['front_cam']['colour'].convert('RGB')
-    # pitch = vehicle.state['pitch'][0]
-    # roll = vehicle.state['roll'][0]
-    # z = vehicle.state['pos'][2]
-    # spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
+    # sensors = bng.poll_sensors(vehicle)
 
     wheelspeed, kph, throttle, integral, runtime, damage = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-    prev_error = setpoint
     kphs, traj, steering_inputs, throttle_inputs, timestamps = [], [], [], [], []
-
-    # outside_track = False
-    # distance_from_center = 0
     frames_adjusted, episode_steps = 0, 0
+    prev_error = setpoint
+    reached_cutoff = False
 
-    writedir = f"{default_scenario}-{road_id}-lap-test"
-    if not os.path.isdir(writedir):
-        os.mkdir(writedir)
+    # writedir = f"{default_scenario}-{road_id}-lap-test"
+    # if not os.path.isdir(writedir):
+    #     os.mkdir(writedir)
     while kph < 35:
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
@@ -715,36 +698,34 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
         cv2.waitKey(1)
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         dt = sensors['timer']['time'] - last_time
+        episode_steps += 1
+        runtime = sensors['timer']['time'] - start_time
 
         processed_img = model.process_image(image).to(device)
         base_model_inf = model(processed_img)
         base_model_inf = float(base_model_inf.item())
         curr_steering = sensors['electrics']['steering_input']
-        # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
         expert_action, cartocl_theta_deg = get_expert_action(vehicle)
         # print(f"action={expert_action=:.3f}\t\ttheta{math.degrees(cartocl_theta_deg)=:.3f}")
         evaluation = abs(expert_action - base_model_inf) < 0.01
-        if False:
-            setpoint_steering = base_model_inf
+        if evaluation:
+            steering = base_model_inf
             blackedout = np.ones(image.shape)
             blackedout[:, :, :2] = blackedout[:, :, :2] * 0
             cv2.imshow("action image", blackedout)  # red
             cv2.waitKey(1)
         else:
             setpoint_steering = expert_action
+            steering = steering_PID(curr_steering, setpoint_steering, dt)
             cv2.imshow("action image", np.zeros(image.shape))  # black
             cv2.waitKey(1)
             frames_adjusted += 1
 
-        episode_steps += 1
-        runtime = sensors['timer']['time'] - start_time
-
-        if abs(setpoint_steering) > 0.15:
+        if abs(steering) > 0.15:
             setpoint = 30
         else:
             setpoint = 40
         throttle = throttle_PID(kph, dt)
-        steering = steering_PID(curr_steering, setpoint_steering, dt)
         vehicle.control(throttle=throttle, steering=steering, brake=0.0)
         steering_inputs.append(steering)
         throttle_inputs.append(throttle)
@@ -764,6 +745,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
         bng.step(1, wait=False)
 
         if distance2D(vehicle.state["pos"], cutoff_point) < 12:
+            reached_cutoff = True
             print("Reached cutoff point, exiting...")
             break
 
@@ -776,21 +758,21 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
 
     deviation = calc_deviation_from_center(centerline, traj)
     results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj,
-               'deviation':deviation, "interventions":frames_adjusted, "episode_steps":episode_steps
+               'deviation':deviation, "interventions":frames_adjusted, "episode_steps":episode_steps,
+               "reached_cutoff": reached_cutoff, "outside_track": outside_track
                }
     return results
 
 def steering_PID(curr_steering,  steer_setpoint, dt):
     global steer_integral, steer_prev_error, topo_id
-    # print(f"steering_PID({curr_steering:3f},{steer_setpoint:3f},{dt:3f}) {steer_prev_error:3f}")
+    # print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{steer_prev_error=:.3f}  \t{topo_id=}")
     if dt == 0:
-        # print(f"{dt=}")
         return 0
-    # kp = 0.75; ki = 0.01; kd = 0.2 # decent
-    # kp = 0.8125; ki = 0.00; kd = 0.2 # decent on straight
     if "windy" in topo_id:
         # kp = .4; ki = 0.00; kd = 0.03
-        kp = .5; ki = 0.001; kd = 0.1
+        kp = 3; ki = 0.00; kd = 0.00
+    elif "straight" in topo_id:
+        kp = 0.8125; ki = 0.00; kd = 0.2  # decent on straight
     else:
         kp = 0.75; ki = 0.01; kd = 0.2  # decent
     error = steer_setpoint - curr_steering
@@ -804,7 +786,7 @@ def steering_PID(curr_steering,  steer_setpoint, dt):
 def get_expert_action(vehicle):
     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle.state['front'])
     dist = min(distance_from_centerline)
-    coming_index = 4
+    coming_index = 3
     i = np.where(distance_from_centerline == dist)[0][0]
     next_point = centerline_interpolated[(i + coming_index) % len(centerline_interpolated)]
     # next_point2 = centerline_interpolated[(i + coming_index*2) % len(centerline_interpolated)]
@@ -821,7 +803,7 @@ def get_expert_action(vehicle):
     img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8,sep='')
     img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    cv2.imshow("plot", img)
+    cv2.imshow("get_expert_action(vehicle)", img)
     cv2.waitKey(1)
     plt.close('all')
     return action, theta
