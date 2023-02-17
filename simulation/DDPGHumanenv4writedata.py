@@ -78,7 +78,7 @@ class CarEnv(gym.Env):
         self.roadleft = []
         self.roadright = []
         self.trajectories, self.current_trajectory = [], []
-        self.all_rewards, self.current_rewards = [], []
+        self.all_rewards, self.current_rewards, self.all_intervention_rates = [], [], []
         self.actions, self.base_model_inf = [], []
         self.image_shape = image_shape
         self.steps_per_sec = 15
@@ -256,6 +256,7 @@ class CarEnv(gym.Env):
                 cv2.imshow("action image", np.zeros(image.shape)) # black
                 cv2.waitKey(1)
                 self.frames_adjusted += 1
+            self.steer_prev_error = taken_action - curr_steering
 
             if abs(taken_action) > 0.15:
                 self.setpoint = 30
@@ -327,6 +328,7 @@ class CarEnv(gym.Env):
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
+            self.all_intervention_rates.append(self.frames_adjusted / self.episode_steps)
             dist = self.get_distance_traveled(self.current_trajectory)
             dist_from_centerline = []
             for i in self.current_trajectory:
@@ -358,7 +360,8 @@ class CarEnv(gym.Env):
                       f"\n\trew max/min/avg/stdev: {max(self.current_rewards):.3f} / {min(self.current_rewards):.3f} / {sum(self.current_rewards)/len(self.current_rewards):.3f} / {np.std(self.current_rewards):.3f}")
                 self.plot_deviation(f"{self.model} {dist=:.1f} ep={self.episode}", self.filepathroot+str(f" avg dist ctr:{sum(dist_from_centerline) / len(dist_from_centerline):.3f} frames adj:{self.frames_adjusted / self.episode_steps:.3f}  rew={sum(self.current_rewards):.1f}"),
                                     save_path=f"{self.filepathroot}/trajs-ep{self.episode}.jpg", start_viz=False)
-                self.plot_durations(self.all_rewards, save=True, title=self.filepathroot)
+                self.plot_durations(self.all_rewards, save=True, title=self.filepathroot, savetitle="rewards_training_performance")
+                self.plot_durations(self.all_intervention_rates, save=True, title=self.filepathroot, savetitle="interventions_training_performance")
             except Exception as e:
                 print(e)
 
@@ -541,7 +544,7 @@ class CarEnv(gym.Env):
             return curr_steering
         if "winding" in self.topo:
             # kp = .4; ki = 0.00; kd = 0.03
-            kp = 1.5; ki = 0.00; kd = 0.0
+            kp = 5; ki = 0.00; kd = 0.0
         elif "straight" in self.topo:
             kp = 0.8125; ki = 0.00; kd = 0.0  # decent on straight
         else:
@@ -884,8 +887,16 @@ class CarEnv(gym.Env):
         else:
             print(f"reversed spawn={edges[-1]['middle']}")
         self.centerline = [edge['middle'] for edge in edges]
-        self.roadleft = [edge['left'] for edge in edges]
-        self.roadright = [edge['right'] for edge in edges]
+        # self.roadleft = [edge['left'] for edge in edges]
+        # self.roadright = [edge['right'] for edge in edges]
+        if self.road_id == "8185":
+            edges = self.bng.get_road_edges("8096")
+            self.roadleft = [edge['middle'] for edge in edges]
+            edges = self.bng.get_road_edges("7878")  # 7820, 7878, 7805
+            self.roadright = [edge['middle'] for edge in edges]
+        else:
+            self.roadleft = [edge['left'] for edge in edges]
+            self.roadright = [edge['right'] for edge in edges]
 
     def plot_racetrack_roads(self):
         roads = self.bng.get_roads()
@@ -989,7 +1000,7 @@ class CarEnv(gym.Env):
     def plot_deviation(self, model, deflation_pattern, save_path=".", start_viz=False):
         plt.figure(20, dpi=180)
         plt.clf()
-        i = 0; x = []; y = []
+        x, y = [], []
         for point in self.centerline:
             x.append(point[0])
             y.append(point[1])
@@ -1004,13 +1015,15 @@ class CarEnv(gym.Env):
             x.append(point[0])
             y.append(point[1])
         plt.plot(x, y, "b-", label="Road")
-        for t in self.trajectories:
+        for i,t in enumerate(self.trajectories):
             x, y = [], []
             for point in t:
                 x.append(point[0])
                 y.append(point[1])
             plt.plot(x, y) #, label="Run {}".format(i))
-            i += 1
+        if self.topo == "winding":
+            plt.xlim([700, 900])
+            plt.ylim([-200, 125])
         plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}', fontdict={'fontsize' : 8})
         plt.legend(fontsize=8)
         plt.draw()
@@ -1025,7 +1038,7 @@ class CarEnv(gym.Env):
                     traj[i][2] - traj[i + 1][2], 2))
         return dist
 
-    def plot_durations(self, rewards, save=False, title="temp"):
+    def plot_durations(self, rewards, save=False, title="temp", savetitle="rewards_training_performance"):
         # plt.figure(2)
         plt.figure(4, figsize=(10,10), dpi=100)
         plt.clf()
@@ -1034,7 +1047,7 @@ class CarEnv(gym.Env):
         plt.title('Training...')
         plt.xlabel('Episode')
         # plt.ylabel('Duration')
-        plt.plot(rewards_t.numpy(), label="Rewards")
+        plt.plot(rewards_t.numpy(), label=savetitle)
         # plt.plot(durations_t.numpy(), "--")
         # Take 100 episode averages and plot them too
         if len(rewards_t) >= 20:
@@ -1043,4 +1056,4 @@ class CarEnv(gym.Env):
             plt.plot(means.numpy(), '--')
         plt.legend()
         if save:
-            plt.savefig(f"{title}/training_performance.jpg")
+            plt.savefig(f"{title}/{savetitle}.jpg")

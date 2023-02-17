@@ -40,10 +40,9 @@ centerline = []
 centerline_interpolated = []
 roadleft = []
 roadright = []
-actual_middle = []
 episode_steps = 0
 interventions = 0
-training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
+training_file = ""
 topo_id = None
 steer_integral, steer_prev_error = 0., 0.
 
@@ -140,7 +139,9 @@ def spawn_point(default_scenario, road_id, reverse=False, seg=1):
             elif seg == 1: # approaching winding portion
                 #  crashes around [846.0238647460938, 127.84288787841797, 150.64915466308594]
                 # return {'pos': (768.1991577148438, -108.50184631347656, 146.9), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
-                return {'pos': (781.2423095703125, -95.72360229492188, 147.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                # return {'pos': (781.2423095703125, -95.72360229492188, 147.4), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
+                return {'pos': (781.2423095703125, -95.72360229492188, 147.4), 'rot': None,
+                        'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -105)}
                 return {'pos': (790.599,-86.7973,147.3), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)} # slightly better?
             elif seg == 2:
                 return {'pos': (854.4083862304688, 136.79324340820312, 152.7), 'rot': None, 'rot_quat': turn_X_degrees((0, 0, -0.278, 0.961), -100)}
@@ -354,26 +355,46 @@ def diff_damage(damage, damage_prev):
         return damage['damage'] - damage_prev['damage']
 
 ''' takes in 3D array of sequential [x,y] '''
-def plot_deviation(trajectories, model, deflation_pattern, centerline):
-    i = 0; x = []; y = []
+def plot_deviation(trajectories, model, deflation_pattern, savefile="trajectories"):
+    global centerline, roadleft, roadright
+    x, y = [], []
     for point in centerline:
         x.append(point[0])
         y.append(point[1])
-    plt.plot(x, y, label="Centerline")
-    for t in trajectories:
-        x = []; y = []
+    plt.plot(x, y, "k-")
+    x, y = [], []
+    for point in roadleft:
+        x.append(point[0])
+        y.append(point[1])
+    plt.plot(x, y, "k-")
+    x, y = [], []
+    for point in roadright:
+        x.append(point[0])
+        y.append(point[1])
+    plt.plot(x, y, "k-", label="Road")
+    for i,t in enumerate(trajectories):
+        x,y = [],[]
         for point in t:
             x.append(point[0])
             y.append(point[1])
         plt.plot(x, y, label="Run {}".format(i))
-        i += 1
-    plt.title('Trajectories with {} {}'.format(model, deflation_pattern))
-    # show a legend on the plot
+    if "winding" in savefile:
+        plt.xlim([700, 900])
+        plt.ylim([-150, 50])
+    elif "straight" in savefile:
+        plt.xlim([50, 180])
+        plt.ylim([-300, -260])
+    elif "Rturn" in savefile:
+        plt.xlim([250, 400])
+        plt.ylim([-300, -150])
+    elif "Lturn" in savefile:
+        pass
+    plt.title(f'Trajectories with {model} \n{savefile}')
     plt.legend()
-    # Display a figure.
+    plt.draw()
+    plt.savefig(f"{deflation_pattern}/{savefile}.jpg")
     plt.show()
     plt.pause(0.1)
-    return
 
 def lineseg_dists(p, a, b):
     """Cartesian distance from point to line segment
@@ -462,18 +483,60 @@ def plot_racetrack_roads(roads, bng, default_scenario, road_id, reverse=False):
     plt.show()
     plt.pause(0.001)
 
+def get_nearby_racetrack_roads(bng, point_of_in, default_scenario):
+    print(f"Plotting nearby roads to point={point_of_in}")
+    roads = bng.get_roads()
+    print("retrieved roads")
+    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
+    symbs = ['-', '--', '-.', ':', '.', ',', 'v', 'o', '1', ]
+    for road in roads:
+        road_edges = bng.get_road_edges(road)
+        x_temp, y_temp = [], []
+        if len(road_edges) < 100:
+            continue
+        xy_def = [edge['middle'][:2] for edge in road_edges]
+        # dists = [distance(xy_def[i], xy_def[i + 1]) for i, p in enumerate(xy_def[:-1:5])]
+        # road_len = sum(dists)
+        dists = [distance(i, point_of_in) for i in xy_def]
+        s = min(dists)
+        if (s > 500): # or road_len < 200:
+            continue
+        for edge in road_edges:
+            x_temp.append(edge['middle'][0])
+            y_temp.append(edge['middle'][1])
+        symb = '{}{}'.format(random.choice(colors), random.choice(symbs))
+        plt.plot(x_temp, y_temp, symb, label=road)
+        print(f"{road=}\tstart=({x_temp[0]},{y_temp[0]},{road_edges[0]['middle'][2]})\t{road_edges[0]['middle']}")
+    plt.plot([point_of_in[0]], [point_of_in[1]], "bo")
+    plt.title(f"{default_scenario} poi={point_of_in}")
+    plt.legend(ncol=10)
+    plt.draw()
+    plt.savefig(f"points near {point_of_in}.jpg")
+    plt.show()
+    plt.pause(0.001)
+
 
 def road_analysis(bng, road_id):
     global centerline, roadleft, roadright
-    # plot_racetrack_roads(bng.get_roads(), bng)
+    print("Performing road analysis...")
+    # plot_racetrack_roads()
     print(f"Getting road {road_id}...")
     edges = bng.get_road_edges(road_id)
-    actual_middle = [edge['middle'] for edge in edges]
-    roadleft = [edge['left'] for edge in edges]
-    roadright = [edge['right'] for edge in edges]
-    adjusted_middle = [np.array(edge['middle']) + (np.array(edge['left']) - np.array(edge['middle']))/4.0 for edge in edges]
-    centerline = actual_middle
-    return actual_middle, adjusted_middle
+    # if reverse:
+    #     edges.reverse()
+    #     print(f"new spawn={edges[0]['middle']}")
+    # else:
+    #     print(f"reversed spawn={edges[-1]['middle']}")
+    centerline = [edge['middle'] for edge in edges]
+    if road_id == "8185":
+        edges = bng.get_road_edges("8096")
+        roadleft = [edge['middle'] for edge in edges]
+        edges = bng.get_road_edges("7878") # 7820, 7878, 7805
+        roadright = [edge['middle'] for edge in edges]
+    else:
+        roadleft = [edge['left'] for edge in edges]
+        roadright = [edge['right'] for edge in edges]
+    return centerline
 
 def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     global centerline, roadleft, roadright
@@ -490,43 +553,6 @@ def plot_trajectory(traj, title="Trajectory", label1="car traj."):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road(spawn, bng, road_id="7982"):
-    line = []; points = []; point_colors = []; spheres = []; sphere_colors = []
-    middle = road_analysis(bng, road_id)
-    middle_end = middle[:3]
-    middle = middle[3:]
-    middle.extend(middle_end)
-    traj = []
-    with open("centerline_lap_data.txt", 'w') as f:
-        for i,p in enumerate(middle[:-1]):
-            f.write("{}\n".format(p))
-            # interpolate at 1m distance
-            if distance(p, middle[i+1]) > 1:
-                y_interp = scipy.interpolate.interp1d([p[0], middle[i+1][0]], [p[1], middle[i+1][1]])
-                num = abs(int(middle[i+1][0] - p[0]))
-                xs = np.linspace(p[0], middle[i+1][0], num=num, endpoint=True)
-                ys = y_interp(xs)
-                for x,y in zip(xs,ys):
-                    traj.append([x,y])
-                    line.append({"x":x, "y":y, "z":p[2], "t":i * 10})
-                    points.append([x, y, p[2]])
-                    point_colors.append([0, 1, 0, 0.1])
-                    spheres.append([x, y, p[2], 0.25])
-                    sphere_colors.append([1, 0, 0, 0.8])
-            else:
-                traj.append([p[0],p[1]])
-                line.append({"x": p[0], "y": p[1], "z": p[2], "t": i * 10})
-                points.append([p[0], p[1], p[2]])
-                point_colors.append([0, 1, 0, 0.1])
-                spheres.append([p[0], p[1], p[2], 0.25])
-                sphere_colors.append([1, 0, 0, 0.8])
-    #         plot_trajectory(traj, "Points on Script So Far")
-    # plot_trajectory(traj, "Planned traj.")
-    bng.add_debug_line(points, point_colors,
-                       spheres=spheres, sphere_colors=sphere_colors,
-                       cling=True, offset=0.1)
-    return line, bng
-
 def plot_input(timestamps, input, input_type, run_number=0):
     plt.plot(timestamps, input)
     plt.xlabel('Timestamps')
@@ -536,55 +562,30 @@ def plot_input(timestamps, input, input_type, run_number=0):
     plt.show()
     plt.pause(0.1)
 
-def create_ai_line_from_road_with_interpolation(spawn, bng, road_id, close_loop=False):
-    global centerline, remaining_centerline, centerline_interpolated, actual_middle
-    line = []; points = []; point_colors = []; spheres = []; sphere_colors = []; traj = []
-    print("Performing road analysis...")
-    actual_middle, adjusted_middle = road_analysis(bng, road_id)
-    # print(f"{actual_middle[0]=}, {actual_middle[-1]=}")
-    middle = adjusted_middle
-    remaining_centerline = copy.deepcopy(middle)
-    timestep = 0.1; elapsed_time = 0; count = 0
-    # set up adjusted centerline
-    for i,p in enumerate(middle[:-1]):
-        # interpolate at 1m distance
-        if distance(p, middle[i+1]) > 1:
-            y_interp = interpolate.interp1d([p[0], middle[i+1][0]], [p[1], middle[i+1][1]])
-            num = int(distance(p, middle[i+1]))
-            xs = np.linspace(p[0], middle[i+1][0], num=num, endpoint=True)
+def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
+    global centerline, roadleft, roadright, centerline_interpolated
+    points, point_colors, spheres, sphere_colors = [], [], [], []
+    centerline_interpolated = []
+    road_analysis(bng, road_id)
+    # get_nearby_racetrack_roads(bng, (174.92, -289.7, 120.7), road_id)
+    # interpolate centerline at 1m distance
+    for i, p in enumerate(centerline[:-1]):
+        if distance(p, centerline[i + 1]) > 1:
+            y_interp = interpolate.interp1d([p[0], centerline[i + 1][0]], [p[1], centerline[i + 1][1]])
+            num = int(distance(p, centerline[i + 1]))
+            xs = np.linspace(p[0], centerline[i + 1][0], num=num, endpoint=True)
             ys = y_interp(xs)
-            for x,y in zip(xs,ys):
-                traj.append([x,y])
+            for x, y in zip(xs, ys):
+                centerline_interpolated.append([x, y])
         else:
-            elapsed_time += distance(p, middle[i+1]) / 12
-            traj.append([p[0],p[1]])
-            linedict = {"x": p[0], "y": p[1], "z": p[2], "t": elapsed_time}
-            line.append(linedict)
-            count += 1
+            centerline_interpolated.append([p[0], p[1]])
     # set up debug line
-    for i,p in enumerate(actual_middle[:-1]):
+    for p in centerline[:-1]:
         points.append([p[0], p[1], p[2]])
         point_colors.append([0, 1, 0, 0.1])
         spheres.append([p[0], p[1], p[2], 0.25])
         sphere_colors.append([1, 0, 0, 0.8])
-        count += 1
-    print("spawn point:{}".format(spawn))
-    print("beginning of script:{}".format(middle[0]))
-    # plot_trajectory(traj, "Points on Script (Final)", "AI debug line")
-    # centerline = copy.deepcopy(traj)
-    remaining_centerline = copy.deepcopy(traj)
-    centerline_interpolated = copy.deepcopy(traj)
-    # plt.plot([i[0] for i in centerline_interpolated], [i[1] for i in centerline_interpolated])
-    # plt.title("centerline interpolated")
-    # plt.show()
-    if close_loop:
-        for i in range(4):
-            centerline.extend(copy.deepcopy(centerline))
-            remaining_centerline.extend(copy.deepcopy(remaining_centerline))
-    bng.add_debug_line(points, point_colors,
-                       spheres=spheres, sphere_colors=sphere_colors,
-                       cling=True, offset=0.1)
-    return line, bng
+    bng.add_debug_line(points, point_colors, spheres=spheres, sphere_colors=sphere_colors, cling=True, offset=0.1)
 
 def add_qr_cubes(scenario):
     global qr_positions
@@ -619,7 +620,6 @@ def add_qr_cubes(scenario):
 
 def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
-    global base_filename
     random.seed(1703)
     setup_logging()
     beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
@@ -635,7 +635,7 @@ def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1,
     bng.set_steps_per_second(steps_per_sec)
     bng.load_scenario(scenario)
     bng.start_scenario()
-    ai_line, bng = create_ai_line_from_road_with_interpolation(spawn, bng, road_id)
+    create_ai_line_from_road_with_interpolation(spawn, bng, road_id)
     bng.pause()
     assert vehicle.skt
     # bng.resume()
@@ -643,7 +643,6 @@ def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1,
 
 def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, transf="None", reverse=False, vehicle_model='etk800', run_number=0,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), seg=None):
-    global base_filename
     global integral, prev_error, setpoint
     global episode_steps, interventions
     if default_scenario == "hirochi_raceway" and road_id == "9039" and seg == 0:
@@ -670,9 +669,6 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
     prev_error = setpoint
     reached_cutoff = False
 
-    # writedir = f"{default_scenario}-{road_id}-lap-test"
-    # if not os.path.isdir(writedir):
-    #     os.mkdir(writedir)
     while kph < 35:
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
@@ -681,6 +677,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
         kph = ms_to_kph(sensors['electrics']['wheelspeed'])
         vehicle.control(throttle=1., steering=0., brake=0.0)
         bng.step(1, wait=True)
+        outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = has_car_left_track(vehicle)
     while damage <= 1:
         vehicle.update_vehicle()
         sensors = bng.poll_sensors(vehicle)
@@ -705,21 +702,24 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
         base_model_inf = model(processed_img)
         base_model_inf = float(base_model_inf.item())
         curr_steering = sensors['electrics']['steering_input']
-        expert_action, cartocl_theta_deg = get_expert_action(vehicle)
+        # expert_action, cartocl_theta_deg = get_expert_action(vehicle)
+        expert_action = -leftrightcenter * (distance_from_center / 8)
+        if topo_id == "Rturn" or topo_id == "Lturn":
+            expert_action = -leftrightcenter * (distance_from_center)
         # print(f"action={expert_action=:.3f}\t\ttheta{math.degrees(cartocl_theta_deg)=:.3f}")
-        evaluation = abs(expert_action - base_model_inf) < 0.01
-        if evaluation:
-            steering = base_model_inf
-            blackedout = np.ones(image.shape)
-            blackedout[:, :, :2] = blackedout[:, :, :2] * 0
-            cv2.imshow("action image", blackedout)  # red
-            cv2.waitKey(1)
-        else:
-            setpoint_steering = expert_action
-            steering = steering_PID(curr_steering, setpoint_steering, dt)
-            cv2.imshow("action image", np.zeros(image.shape))  # black
-            cv2.waitKey(1)
-            frames_adjusted += 1
+        evaluation = abs(expert_action - base_model_inf) < 0.05
+        # if evaluation:
+        #     steering = base_model_inf
+        #     blackedout = np.ones(image.shape)
+        #     blackedout[:, :, :2] = blackedout[:, :, :2] * 0
+        #     cv2.imshow("action image", blackedout)  # red
+        #     cv2.waitKey(1)
+        # else:
+        setpoint_steering = expert_action
+        steering = steering_PID(curr_steering, setpoint_steering, dt)
+        cv2.imshow("action image", np.zeros(image.shape))  # black
+        cv2.waitKey(1)
+        frames_adjusted += 1
 
         if abs(steering) > 0.15:
             setpoint = 30
@@ -765,22 +765,30 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
 
 def steering_PID(curr_steering,  steer_setpoint, dt):
     global steer_integral, steer_prev_error, topo_id
-    # print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{steer_prev_error=:.3f}  \t{topo_id=}")
     if dt == 0:
         return 0
-    if "windy" in topo_id:
+    if "winding" in topo_id:
         # kp = .4; ki = 0.00; kd = 0.03
-        kp = 3; ki = 0.00; kd = 0.00
+        #kp = 3; ki = 0.00; kd = 0.01 # using angle relative to ctrline
+        #kp = 0.75; ki = 0.00; kd = 0.2 # using LRC and dist to ctrline
+        #kp = 0.5; ki = 0.00; kd = 0.2  # using LRC and dist to ctrline; avg dist from center=1.0809121348292758
+        kp = 0.425; ki = 0.00; kd = 0.2  # using LRC and dist to ctrline; Average deviation: 1.023
+        # kp = 0.225; ki = 0.00; kd = 0.1  # using LRC and dist to ctrline; Average deviation:
     elif "straight" in topo_id:
-        kp = 0.8125; ki = 0.00; kd = 0.2  # decent on straight
+        # kp = 0.8125; ki = 0.00; kd = 0.2
+        kp = 0.1; ki = 0.00; kd = 0.01 # decent on straight Average deviation: 1.096
+    elif "Rturn" in topo_id:
+        kp = 0.8125; ki = 0.00; kd = 0.3
+    elif "Lturn" in topo_id:
+        kp = 0.3; ki = 0.00; kd = 0.0
     else:
         kp = 0.75; ki = 0.01; kd = 0.2  # decent
     error = steer_setpoint - curr_steering
     deriv = (error - steer_prev_error) / dt
     steer_integral = steer_integral + error * dt
     w = kp * error + ki * steer_integral + kd * deriv
+    print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{steer_prev_error=:.3f}  \t{w=:.3f}")
     steer_prev_error = error
-    # print(f"returning {w:3f}")
     return w
 
 def get_expert_action(vehicle):
@@ -797,6 +805,7 @@ def get_expert_action(vehicle):
     plt.plot([j[0] for j in centerline_interpolated[i+coming_index:i+20]], [j[1] for j in centerline_interpolated[i+coming_index:i+20]], label="centerline")
     plt.plot(next_point[0], next_point[1], 'ro', label="next waypoint")
     plt.legend()
+    plt.title(f"{action=:.3f} theta={math.degrees(theta):.1f}")
     ax = plt.gca()
     ax.set_aspect('equal', adjustable='box')
     fig.canvas.draw()
@@ -818,7 +827,7 @@ def angle_between(vehicle_state, next_waypoint, next_waypoint2=None):
     inner_angle = vehicle_angle - waypoint_angle
     return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
-# track ~12.50m wide; car ~1.85m wide
+''' track ~12.50m wide; car ~1.85m wide '''
 def has_car_left_track(vehicle):
     global centerline_interpolated
     vehicle.update_vehicle()
@@ -826,29 +835,31 @@ def has_car_left_track(vehicle):
     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle_pos)
     dist = min(distance_from_centerline)
     i = np.where(distance_from_centerline == dist)[0][0]
-    leftrightcenter = get_position_relative_to_centerline(vehicle.state['front'], dist, i, centerdist=1.5)
+    leftrightcenter = get_position_relative_to_centerline(vehicle.state['front'], dist, i, centerdist=0.25)
+    print(f"{leftrightcenter=}  \tdist from ctrline={dist:.3f}")
     segment_shape, theta_deg = get_current_segment_shape(vehicle_pos)
     return dist > 4.0, dist, leftrightcenter, segment_shape, theta_deg
 
+'''returns centered=0, left of centerline=-1, right of centerline=1'''
 def get_position_relative_to_centerline(front, dist, i, centerdist=1):
-    A = centerline_interpolated[i]
-    B = centerline_interpolated[(i + 2) % len(centerline_interpolated)]
+    A = centerline_interpolated[(i + 1) % len(centerline_interpolated)]
+    B = centerline_interpolated[(i + 4) % len(centerline_interpolated)]
     P = front
     d = (P[0]-A[0])*(B[1]-A[1])-(P[1]-A[1])*(B[0]-A[0])
     if abs(dist) < centerdist:
-        return 0
+        return 0 # on centerline
     elif d < 0:
-        return 1
+        return -1 # left of centerline
     elif d > 0:
-        return 2
+        return 1 # right of centerline
 
 def get_current_segment_shape(vehicle_pos):
-    global actual_middle
-    distance_from_centerline = dist_from_line(actual_middle, vehicle_pos)
+    global centerline
+    distance_from_centerline = dist_from_line(centerline, vehicle_pos)
     dist = min(distance_from_centerline)
     i = np.where(distance_from_centerline == dist)[0][0]
-    A = np.array(actual_middle[(i + 2) % len(actual_middle)])
-    B = np.array(actual_middle[i])
+    A = np.array(centerline[(i + 2) % len(centerline)])
+    B = np.array(centerline[i])
     C = np.array(roadright[i])
     theta = math.acos(np.vdot(B-A, B-C) / (np.linalg.norm(B-A) * np.linalg.norm(B-C)))
     theta_deg = math.degrees(theta)
@@ -893,7 +904,7 @@ def fisheye_inv(image):
         return img
 
 def get_topo(topo_id):
-    if "windy" in topo_id:
+    if "winding" in topo_id:
         default_scenario = "west_coast_usa"; road_id = "10988"; seg = 1
     elif "straight" in topo_id:
         default_scenario = "automation_test_track"; road_id = "8185"; seg = None
@@ -917,42 +928,49 @@ def get_transf(transf_id):
     return img_dims, fov, transf
 
 def main():
-    global base_filename, interventions, episode_steps
+    global interventions, episode_steps, centerline
     global steer_integral, steer_prev_error, topo_id
     model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    topo_id= "windy"
+    topo_id = "Lturn"
     transf_id = "fisheye"
-    runs = 5
+    runs = 10
     default_scenario, road_id, seg = get_topo(topo_id)
     img_dims, fov, transf = get_transf(transf_id)
 
     vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, transf=transf, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
-                                          beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
+                                          beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE2', port=64556)
     distances, deviations, all_episode_steps, interventions = [], [], [], []
+    trajectories = []
     for i in range(runs):
         results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, transf=transf, vehicle_model='hopper', run_number=i, seg=seg)
         results['distance'] = get_distance_traveled(results['traj'])
         # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
         print(f"\nEVALUATOR + BASE MODEL + NEW CAMERA + INV TRANSF, RUN {i}:"
-              f"\n\tdistance={results['distance']}"
-              f"\n\tavg dist from center={results['deviation']['mean']}"
-              f"\n\tintervention rate:{(results['interventions'] / results['episode_steps']):3f}")
+              f"\n\tdistance={results['distance']:.3f}"
+              f"\n\tavg dist from center={results['deviation']['mean']:.3f}"
+              f"\n\tintervention rate:{(results['interventions'] / results['episode_steps']):.3f}")
         distances.append(results['distance'])
         deviations.append(results['deviation']['mean'])
         interventions.append(results['interventions'])
         all_episode_steps.append(results['episode_steps'])
+        trajectories.append(results["traj"])
         steer_integral, steer_prev_error = 0.0, 0.0
     print(f"OUT OF {runs} RUNS:"
-          f"\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
-          f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
-          f"\n\tAverage intervention rate:{(sum(interventions) / sum(all_episode_steps)):3f}"
+          f"\n\tAverage distance: {(sum(distances)/len(distances)):.1f}"
+          f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):.3f}"
+          f"\n\tAverage intervention rate:{(sum(interventions) / sum(all_episode_steps)):.3f}"
           f"\n\t{distances=}"
           f"\n\t{deviations=}"
           f"\n\t{interventions=}"
           f"\n\t{all_episode_steps=}")
+    id="evalalone" #"basemodel+invtransf+0.05evalcorr"
+    try:
+        plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
+    except:
+        plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
     bng.close()
 
 

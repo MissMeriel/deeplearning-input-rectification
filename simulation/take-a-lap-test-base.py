@@ -347,28 +347,36 @@ def diff_damage(damage, damage_prev):
     else:
         return damage['damage'] - damage_prev['damage']
 
-# takes in 3D array of sequential [x,y]
-# produces plot
-def plot_deviation(trajectories, model, deflation_pattern, centerline):
-    i = 0; x = []; y = []
+
+''' takes in 3D array of sequential [x,y] '''
+def plot_deviation(trajectories, model, deflation_pattern, savefile="trajectories"):
+    global centerline, roadleft, roadright
+    x, y = [], []
     for point in centerline:
         x.append(point[0])
         y.append(point[1])
-    plt.plot(x, y, label="Centerline")
-    for t in trajectories:
-        x = []; y = []
+    for point in roadleft:
+        x.append(point[0])
+        y.append(point[1])
+    for point in roadright:
+        x.append(point[0])
+        y.append(point[1])
+    plt.plot(x, y, "k-", label="Road")
+    for i,t in enumerate(trajectories):
+        x,y = [],[]
         for point in t:
             x.append(point[0])
             y.append(point[1])
         plt.plot(x, y, label="Run {}".format(i))
-        i += 1
-    plt.title('Trajectories with {} {}'.format(model, deflation_pattern))
-    # show a legend on the plot
+    if "winding" in savefile:
+        plt.xlim([700, 900])
+        plt.ylim([-150, 50])
+    plt.title(f'Trajectories with {model} \n{savefile}')
     plt.legend()
-    # Display a figure.
+    plt.draw()
+    plt.savefig(f"{deflation_pattern}/{savefile}.jpg")
     plt.show()
     plt.pause(0.1)
-    return
 
 def lineseg_dists(p, a, b):
     """Cartesian distance from point to line segment
@@ -829,6 +837,7 @@ def main():
     vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64556)
     distances, deviations = [], []
+    trajectories = []
     runs = 50
     for i in range(runs):
         results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, seg=seg)
@@ -839,10 +848,16 @@ def main():
               f"\n\tavg dist from center={results['deviation']['mean']}")
         distances.append(results['distance'])
         deviations.append(results['deviation']['mean'])
+        trajectories.append(results["traj"])
     print(f"OUT OF {runs} RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
           f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
           f"\n\t{distances=}"
           f"\n\t{deviations:}")
+    id = "basemodelalone"  # "basemodel+invtransf+0.05evalcorr"
+    try:
+        plot_deviation(trajectories, "DAVE2V3 ", ".", savefile=f"{topo_id}-{transf_id}-{id}")
+    except:
+        plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
     bng.close()
 
 
