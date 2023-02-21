@@ -388,7 +388,8 @@ def plot_deviation(trajectories, model, deflation_pattern, savefile="trajectorie
         plt.xlim([250, 400])
         plt.ylim([-300, -150])
     elif "Lturn" in savefile:
-        pass
+        plt.xlim([-400, -250])
+        plt.ylim([-850, -700])
     plt.title(f'Trajectories with {model} \n{savefile}')
     plt.legend()
     plt.draw()
@@ -643,7 +644,7 @@ def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1,
 
 def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, transf="None", reverse=False, vehicle_model='etk800', run_number=0,
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), seg=None):
-    global integral, prev_error, setpoint
+    global integral, prev_error, setpoint, steer_prev_error
     global episode_steps, interventions
     if default_scenario == "hirochi_raceway" and road_id == "9039" and seg == 0:
         cutoff_point = [368.466, -206.154, 43.8237]
@@ -708,19 +709,19 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
             expert_action = -leftrightcenter * (distance_from_center)
         # print(f"action={expert_action=:.3f}\t\ttheta{math.degrees(cartocl_theta_deg)=:.3f}")
         evaluation = abs(expert_action - base_model_inf) < 0.05
-        # if evaluation:
-        #     steering = base_model_inf
-        #     blackedout = np.ones(image.shape)
-        #     blackedout[:, :, :2] = blackedout[:, :, :2] * 0
-        #     cv2.imshow("action image", blackedout)  # red
-        #     cv2.waitKey(1)
-        # else:
-        setpoint_steering = expert_action
-        steering = steering_PID(curr_steering, setpoint_steering, dt)
-        cv2.imshow("action image", np.zeros(image.shape))  # black
-        cv2.waitKey(1)
-        frames_adjusted += 1
-
+        if evaluation:
+            steering = base_model_inf
+            blackedout = np.ones(image.shape)
+            blackedout[:, :, :2] = blackedout[:, :, :2] * 0
+            cv2.imshow("action image", blackedout)  # red
+            cv2.waitKey(1)
+        else:
+            setpoint_steering = expert_action
+            steering = steering_PID(curr_steering, setpoint_steering, dt)
+            cv2.imshow("action image", np.zeros(image.shape))  # black
+            cv2.waitKey(1)
+            frames_adjusted += 1
+        # steer_prev_error = steering - curr_steering
         if abs(steering) > 0.15:
             setpoint = 30
         else:
@@ -780,7 +781,7 @@ def steering_PID(curr_steering,  steer_setpoint, dt):
     elif "Rturn" in topo_id:
         kp = 0.8125; ki = 0.00; kd = 0.3
     elif "Lturn" in topo_id:
-        kp = 0.3; ki = 0.00; kd = 0.0
+        kp = 0.5; ki = 0.00; kd = 0.3
     else:
         kp = 0.75; ki = 0.01; kd = 0.2  # decent
     error = steer_setpoint - curr_steering
@@ -934,7 +935,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    topo_id = "Lturn"
+    topo_id = "Rturn"
     transf_id = "fisheye"
     runs = 10
     default_scenario, road_id, seg = get_topo(topo_id)
@@ -966,11 +967,11 @@ def main():
           f"\n\t{deviations=}"
           f"\n\t{interventions=}"
           f"\n\t{all_episode_steps=}")
-    id="evalalone" #"basemodel+invtransf+0.05evalcorr"
-    try:
-        plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
-    except:
-        plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
+    id = "basemodel+invtransf+0.05evalcorr" # "evalalone" #
+    # try:
+    plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
+    # except:
+    #     plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")
     bng.close()
 
 

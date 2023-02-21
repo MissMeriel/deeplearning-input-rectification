@@ -34,9 +34,9 @@ def parse_args():
                         help='parent directory of BeamNG instance')
     parser.add_argument('-p', '--port', type=int, default=64156,
                         help='port to communicate with BeamNG simulator (try 64156, 64356, 64556...)')
-    parser.add_argument('-ee', '--evaleps', type=float, default=0.05,
+    parser.add_argument('-ee', '--evaleps', type=float, default=0.01,
                         help='Evaluation epsilon above which the expert intervenes')
-    parser.add_argument('-te', '--testeps', type=float, default=0.05,
+    parser.add_argument('-te', '--testeps', type=float, default=0.01,
                         help='Test epsilon above which the RL agent intervenes')
     args = parser.parse_args()
     print(args.transformation, args.scenario, args.path2src, args.beamnginstance, args.port, args.evaleps, args.testeps)
@@ -56,7 +56,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"F:/RRL-results/RLtrain-TESTEVAL-{label}-{transf}-max200-{eval_eps}eval-{timestr}-{randstr}"
+    newdir = f"F:/RRL-results/RLtrain-onpolicyeval-{label}-{transf}-max200-{eval_eps}eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
@@ -66,8 +66,8 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
         os.mkdir(newdir_eval)
 
     from DDPGHumanenv4writedata import CarEnv
-    policytype = "CnnPolicy"
-    noise_sigma = 0.2
+    policytype = "MlpPolicy"
+    noise_sigma = 0.001 #0.0005
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance=beamnginstance, port=port, scenario=scenario, road_id=road_id, reverse=False,
@@ -75,7 +75,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
 
     eval_env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir_eval, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance='BeamNG.researchINSTANCE4', port=64956, scenario=scenario, road_id=road_id, reverse=False,
-                 base_model=model_filename, test_model=False, seg=seg, transf=transf, topo=label, eval_eps=eval_eps)
+                 base_model=model_filename, test_model=True, seg=seg, transf=transf, topo=label, eval_eps=eval_eps)
 
     start_time = time.time()
     from stable_baselines3 import DDPG
@@ -98,15 +98,14 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     )
     # Create an evaluation callback with the same env, called every 10000 iterations
     from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnMaxEpisodes, EveryNTimesteps
-    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=2000, verbose=1)
+    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=500, verbose=1)
     callbacks = []
     eval_callback = EvalCallback(
         eval_env,
-        # env,
         n_eval_episodes=5,
         best_model_save_path=f"{newdir}",
         log_path=f"{newdir}",
-        eval_freq=10000,
+        eval_freq=5000,
         verbose=1
     )
     # everyN_callback = EveryNTimesteps(n_steps=50, callback=callback_max_episodes)

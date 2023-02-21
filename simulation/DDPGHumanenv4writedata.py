@@ -60,6 +60,7 @@ class CarEnv(gym.Env):
         self.action_space = spaces.Box(low=-2, high=2, shape=(1,1), dtype=np.float32)
         self.transform = T.Compose([T.ToTensor()])
         self.episode_steps, self.frames_adjusted = 0, 0
+        self.steer_integral, self.steer_prev_error = 0., 0.
         self.beamngpath = beamngpath
         if base_model is not None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,12 +174,13 @@ class CarEnv(gym.Env):
         else:
             cutoff_point = [601.547, 53.4482, 43.29]
         if self.test_model:
-            sensors = self.bng.poll_sensors(self.vehicle)
-            kph = self.ms_to_kph(sensors['electrics']['wheelspeed'])
-            dt = (sensors['timer']['time'] - self.start_time) - self.runtime
-            self.runtime = sensors['timer']['time'] - self.start_time
-            throttle = self.throttle_PID(kph, dt)
-            image = np.array(sensors['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+            obs = self._get_obs()
+            kph = self.ms_to_kph(self.car_state['electrics']['wheelspeed'])
+            dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
+            # curr_steering = self.car_state['electrics']['steering_input']
+            self.runtime = self.car_state['timer']['time'] - self.start_time
+            image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
+
             if self.transf == "fisheye":
                 image = self.fisheye_inv(image)
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
@@ -192,14 +194,14 @@ class CarEnv(gym.Env):
 
             if abs(action.item()) < self.test_eps:
                 steer = float(base_model_inf)
-                blackedout = np.zeros(image.shape) # BLACK
+                blackedout = np.zeros(image.shape)  # BLACK
                 cv2.imshow("action image", blackedout)
                 cv2.waitKey(1)
             else:
                 steer = float(base_model_inf + action.item())
                 self.frames_adjusted += 1
                 blackedout = np.ones(image.shape)
-                blackedout[:,:,:2] = blackedout[:,:,:2] * 0 # RED
+                blackedout[:, :, :2] = blackedout[:, :, :2] * 0  # RED
                 cv2.imshow("action image", blackedout)
                 cv2.waitKey(1)
             # print(f"DDPG action={action.item():.3f}, base_model={base_model_inf:.3f}, steer={steer:.3f}")
@@ -207,11 +209,12 @@ class CarEnv(gym.Env):
                 self.setpoint = 30
             else:
                 self.setpoint = 40
+            throttle = self.throttle_PID(kph, dt)
 
             self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
             self.bng.step(1, wait=True)
-            obs = self._get_obs()
-            outside_track, distance_from_center = self.has_car_left_track()
+            # obs = self._get_obs()
+            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
 
             # reward = 0
             # expert_action, cartocl_theta_deg = self.get_expert_action()
@@ -220,12 +223,14 @@ class CarEnv(gym.Env):
 
             self.episode_steps += 1
             # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
-            done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
+            done = outside_track or self.state["collision"] or (
+                        self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
             self.current_rewards.append(reward)
             return obs, reward, done, self.state
 
         else:
             obs = self._get_obs()
+            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             kph = self.ms_to_kph(self.car_state['electrics']['wheelspeed'])
             dt = (self.car_state['timer']['time'] - self.start_time) - self.runtime
             curr_steering = self.car_state['electrics']['steering_input']
@@ -233,6 +238,11 @@ class CarEnv(gym.Env):
             image = np.array(self.car_state['front_cam']['colour'].convert('RGB'), dtype=np.uint8)
             if self.transf == "fisheye":
                 image = self.fisheye_inv(image)
+            elif "resdec" in self.transf or "resinc" in self.transf:
+                image = image.resize((240, 135))
+                # image = cv2.resize(np.array(image), (135,240))
+            elif "depth" in self.transf:
+                image_seg = self.car_state['front_cam']['annotation'].convert('RGB')
             image = cv2.resize(image, (self.image_shape[2], self.image_shape[1]))
             cv2.imshow("true image", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
@@ -240,22 +250,26 @@ class CarEnv(gym.Env):
             features = self.transform(image)[None]
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
-            # outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
-            expert_action, cartocl_theta_deg = self.get_expert_action()
+            # expert_action, cartocl_theta_deg = self.get_expert_action()
+            expert_action = -leftrightcenter * (distance_from_center / 8)
+            if self.topo == "Rturn" or self.topo == "Lturn":
+                expert_action = -leftrightcenter * (distance_from_center)
             # evaluation = self.evaluator(outside_track, distance_from_center, leftrightcenter, segment_shape, base_model_inf + action.item())
             evaluation = abs(expert_action - (base_model_inf + action.item())) < self.eval_eps
+
             if evaluation:
                 taken_action = base_model_inf + action.item()
                 blackedout = np.ones(image.shape)
-                blackedout[:,:,:2] = blackedout[:,:,:2] * 0
-                cv2.imshow("action image", blackedout) # red
+                blackedout[:, :, :2] = blackedout[:, :, :2] * 0
+                cv2.imshow("action image", blackedout)  # red
                 cv2.waitKey(1)
+                self.steer_prev_error, self.steer_integral = 0., 0.
             else:
-                # print(f"{expert_action=:.3f}")
                 taken_action = self.steering_PID(curr_steering, expert_action, dt)
-                cv2.imshow("action image", np.zeros(image.shape)) # black
+                cv2.imshow("action image", np.zeros(image.shape))  # black
                 cv2.waitKey(1)
                 self.frames_adjusted += 1
+
             self.steer_prev_error = taken_action - curr_steering
 
             if abs(taken_action) > 0.15:
@@ -266,7 +280,7 @@ class CarEnv(gym.Env):
             self.vehicle.control(throttle=throttle, steering=taken_action, brake=0.0)
             self.bng.step(1, wait=True)
             self.vehicle.update_vehicle()
-            outside_track, distance_from_center = self.has_car_left_track()
+            outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
             reward = self.calc_reward(base_model_inf + action.item(), expert_action)
 
             position = str(self.state['pose']).replace(",", " ")
@@ -286,10 +300,10 @@ class CarEnv(gym.Env):
     def calc_reward(self, agent_action, expert_action):
         if self.state["collision"]:
             return -5000
-        if abs(expert_action - agent_action) < 0.05:
+        if abs(expert_action - agent_action) < self.eval_eps:
             return 1
         else:
-            return -abs(expert_action - agent_action)
+            return -abs(expert_action - agent_action) * 100
 
     def calc_reward_onpolicy(self, outside_track, distance_from_center):
         if outside_track or self.state["collision"]:
@@ -324,7 +338,7 @@ class CarEnv(gym.Env):
 
     def reset(self):
         print(f"\n\n\nRESET()")
-        if self.episode > -1 and len(self.current_trajectory) > 0:
+        if self.episode > -1 and len(self.current_trajectory) > 0 and self.episode_steps > 0:
             print(f"SUMMARY OF EPISODE #{self.episode}")
             self.trajectories.append(self.current_trajectory)
             self.all_rewards.append(sum(self.current_rewards))
@@ -377,6 +391,7 @@ class CarEnv(gym.Env):
         self.current_rewards = []
         self.integral, self.prev_error = 0.0, 0.0
         self.steer_integral, self.steer_prev_error = 0.0, 0.0
+        self.steer_integral, self.steer_prev_error = 0., 0.
         self.bng.restart_scenario()
         kph = 0
         while kph < 35:
@@ -488,8 +503,20 @@ class CarEnv(gym.Env):
         # print(f"wp_angle={math.degrees(waypoint_angle):.1f}  \tvehicle_angle={math.degrees(vehicle_angle):.1f}")
         return math.atan2(math.sin(inner_angle), math.cos(inner_angle))
 
-    # track ~12.50m wide; car ~1.85m wide
+    ''' track ~12.50m wide; car ~1.85m wide '''
     def has_car_left_track(self):
+        self.vehicle.update_vehicle()
+        vehicle_pos = self.vehicle.state['front']
+        distance_from_centerline = self.dist_from_line(self.centerline_interpolated, vehicle_pos)
+        dist = min(distance_from_centerline)
+        i = np.where(distance_from_centerline == dist)[0][0]
+        leftrightcenter = self.get_position_relative_to_centerline(self.vehicle.state['front'], dist, i, centerdist=0.25)
+        # print(f"{leftrightcenter=}  \tdist from ctrline={dist:.3f}")
+        segment_shape, theta_deg = self.get_current_segment_shape(vehicle_pos)
+        return dist > 4.0, dist, leftrightcenter, segment_shape, theta_deg
+
+    # track ~12.50m wide; car ~1.85m wide
+    def has_car_left_track_old(self):
         self.vehicle.update_vehicle()
         vehicle_pos = self.vehicle.state['front'] #self.vehicle.state['pos']
         distance_from_centerline = self.dist_from_line(self.centerline_interpolated, vehicle_pos)
@@ -498,6 +525,8 @@ class CarEnv(gym.Env):
         # leftrightcenter = self.get_position_relative_to_centerline(dist, i, centerdist=1.5)
         # segment_shape, theta_deg = self.get_current_segment_shape(vehicle_pos)
         return dist > 4.0, dist #, leftrightcenter, segment_shape, theta_deg
+
+
 
     def get_current_segment_shape(self, vehicle_pos):
         distance_from_centerline = self.dist_from_line(self.centerline, vehicle_pos)
@@ -524,7 +553,21 @@ class CarEnv(gym.Env):
             return result + 360
         return result
 
-    def get_position_relative_to_centerline(self, dist, i, centerdist=1):
+    '''returns centered=0, left of centerline=-1, right of centerline=1'''
+
+    def get_position_relative_to_centerline(self, front, dist, i, centerdist=1):
+        A = self.centerline_interpolated[(i + 1) % len(self.centerline_interpolated)]
+        B = self.centerline_interpolated[(i + 4) % len(self.centerline_interpolated)]
+        P = front
+        d = (P[0] - A[0]) * (B[1] - A[1]) - (P[1] - A[1]) * (B[0] - A[0])
+        if abs(dist) < centerdist:
+            return 0  # on centerline
+        elif d < 0:
+            return -1  # left of centerline
+        elif d > 0:
+            return 1  # right of centerline
+
+    def get_position_relative_to_centerline_old(self, dist, i, centerdist=1):
         A = self.centerline_interpolated[i]
         B = self.centerline_interpolated[(i + 2) % len(self.centerline_interpolated)]
         P = self.vehicle.state['front']
@@ -538,22 +581,26 @@ class CarEnv(gym.Env):
 
     ################################# BEAMNG HELPERS #################################
 
-    # -1 is left turn, 1 is right turn
     def steering_PID(self, curr_steering, steer_setpoint, dt):
         if dt == 0:
-            return curr_steering
+            return 0
         if "winding" in self.topo:
-            # kp = .4; ki = 0.00; kd = 0.03
-            kp = 5; ki = 0.00; kd = 0.0
+            kp = 0.425; ki = 0.00; kd = 0.0  # using LRC and dist to ctrline; Average deviation: 1.023
         elif "straight" in self.topo:
-            kp = 0.8125; ki = 0.00; kd = 0.0  # decent on straight
+            # kp = 0.8125; ki = 0.00; kd = 0.2
+            kp = 0.1; ki = 0.00; kd = 0.01  # decent on straight Average deviation: 1.096
+        elif "Rturn" in self.topo:
+            kp = 0.8125; ki = 0.00; kd = 0.3
+        elif "Lturn" in self.topo:
+            kp = 0.5; ki = 0.00; kd = 0.3
         else:
             kp = 0.75; ki = 0.01; kd = 0.2  # decent
         error = steer_setpoint - curr_steering
         deriv = (error - self.steer_prev_error) / dt
-        steer_integral = self.steer_integral + error * dt
-        w = kp * error + ki * steer_integral + kd * deriv
-        # print(f"steering_PID({curr_steering=:.3f}  \tsetpoint={steer_setpoint:.3f}  \t{dt=:.3f})  \tprev_error{self.steer_prev_error:.3f}  \t{w=:.3f}")
+        self.steer_integral = self.steer_integral + error * dt
+        w = kp * error + ki * self.steer_integral + kd * deriv
+        # print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{self.steer_prev_error=:.3f}  "
+        #       f"\n{error:.3f} \t{deriv=:.3f} \t{w=:.3f}")
         self.steer_prev_error = error
         return w
 
