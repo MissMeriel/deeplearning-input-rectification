@@ -57,7 +57,7 @@ class CarEnv(gym.Env):
         self.ep_dir = None
         self.seg = seg
         self.test_model = test_model
-        self.action_space = spaces.Box(low=-2, high=2, shape=(1,1), dtype=np.float32)
+        self.action_space = spaces.Box(low=-2, high=2, shape=(1, 1), dtype=np.float32)
         self.transform = T.Compose([T.ToTensor()])
         self.episode_steps, self.frames_adjusted = 0, 0
         self.steer_integral, self.steer_prev_error = 0., 0.
@@ -86,7 +86,6 @@ class CarEnv(gym.Env):
         self.runtime = 0.0
         self.episode = -1
         random.seed(1703)
-        #setup_logging()
         self.model = model
         self.filepathroot = filepathroot
         beamng = BeamNGpy('localhost', port=port, home=f'{self.beamngpath}/BeamNG.research.v1.7.0.1', user=f'{self.beamngpath}/{beamnginstance}')
@@ -213,10 +212,9 @@ class CarEnv(gym.Env):
 
             self.vehicle.control(throttle=throttle, steering=steer, brake=0.0)
             self.bng.step(1, wait=True)
-            # obs = self._get_obs()
+
             outside_track, distance_from_center, leftrightcenter, segment_shape, theta_deg = self.has_car_left_track()
 
-            # reward = 0
             # expert_action, cartocl_theta_deg = self.get_expert_action()
             # reward = self.calc_reward(base_model_inf + action.item(), expert_action)
             reward = self.calc_reward_onpolicy(outside_track, distance_from_center)
@@ -290,7 +288,6 @@ class CarEnv(gym.Env):
             self.f.write(f"{img_filename.split('/')[-1]},{taken_action},{position},{orientation},{kph},{self.car_state['electrics']['steering']},{throttle}\n")
 
             self.episode_steps += 1
-            # print(outside_track, self.state["collision"], (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12))
             done = outside_track or self.state["collision"] or (self.distance(self.state["pose"][:2], cutoff_point[:2]) < 12)
             self.current_rewards.append(reward)
             # print(f"STEP() \n\troad_seg {theta_deg=:.1f}\t car-to-CL theta_deg={cartocl_theta_deg:.1f}\n\texpert_action={expert_action:.3f}\t\t{base_model_inf=:.3f}\n\t{reward=:.1f}\n\t{done=}\t{outside_track=}\tcollision={self.state['collision']}")
@@ -303,7 +300,7 @@ class CarEnv(gym.Env):
         if abs(expert_action - agent_action) < self.eval_eps:
             return 1
         else:
-            return -abs(expert_action - agent_action) * 100
+            return -abs(expert_action - agent_action)
 
     def calc_reward_onpolicy(self, outside_track, distance_from_center):
         if outside_track or self.state["collision"]:

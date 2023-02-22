@@ -34,9 +34,9 @@ def parse_args():
                         help='parent directory of BeamNG instance')
     parser.add_argument('-p', '--port', type=int, default=64156,
                         help='port to communicate with BeamNG simulator (try 64156, 64356, 64556...)')
-    parser.add_argument('-ee', '--evaleps', type=float, default=0.01,
+    parser.add_argument('-ee', '--evaleps', type=float, default=0.05,
                         help='Evaluation epsilon above which the expert intervenes')
-    parser.add_argument('-te', '--testeps', type=float, default=0.01,
+    parser.add_argument('-te', '--testeps', type=float, default=0.05,
                         help='Test epsilon above which the RL agent intervenes')
     args = parser.parse_args()
     print(args.transformation, args.scenario, args.path2src, args.beamnginstance, args.port, args.evaleps, args.testeps)
@@ -61,13 +61,13 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedata.py", newdir)
-    newdir_eval = f"F:/RRL-results/RLtrain-{label}-{transf}-max200-{eval_eps}eval-eval-{timestr}-{randstr}"
+    newdir_eval = f"F:/RRL-results/RLtrain-onpolicyeval-{label}-{transf}-max200-{eval_eps}eval-eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir_eval)
 
     from DDPGHumanenv4writedata import CarEnv
     policytype = "MlpPolicy"
-    noise_sigma = 0.001 #0.0005
+    noise_sigma = 0.000025
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance=beamnginstance, port=port, scenario=scenario, road_id=road_id, reverse=False,
@@ -105,7 +105,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
         n_eval_episodes=5,
         best_model_save_path=f"{newdir}",
         log_path=f"{newdir}",
-        eval_freq=5000,
+        eval_freq=10000,
         verbose=1
     )
     # everyN_callback = EveryNTimesteps(n_steps=50, callback=callback_max_episodes)
