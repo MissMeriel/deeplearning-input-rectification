@@ -54,11 +54,11 @@ sys.path.append(f'{args.path2src}/GitHub/DPT/')
 def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn", transf="fisheye",
                 beamnginstance="BeamNG.research", port=64156, eval_eps=0.05):
     policytype = "MlpPolicy"
-    # if label == "winding":
-    noise_sigma = 0.558 # 0.25 #
-    # else:
-    #     noise_sigma = 0.000025
-    maxepisodes = 200
+    if label == "winding":
+        noise_sigma = 0.558 # 0.25
+    else:
+        noise_sigma = 0.000025
+    maxepisodes = 500
 
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
@@ -96,7 +96,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=noise_sigma * np.ones(n_actions))
     model = DDPG(
         policytype,
-        eval_env,
+        env,
         action_noise=action_noise,
         learning_rate=0.001,
         verbose=1,
@@ -123,7 +123,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     # callback_save_on_best = SaveOnBestTrainingRewardCallback(check_freq=5, log_dir=newdir, verbose=1)
     callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=maxepisodes, verbose=1)
     eval_callback = EvalCallback(
-        env,
+        eval_env,
         n_eval_episodes=10,
         # callback_on_new_best=checkpoint_callback,
         best_model_save_path=newdir,
