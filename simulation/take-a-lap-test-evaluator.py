@@ -760,7 +760,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, trans
     deviation = calc_deviation_from_center(centerline, traj)
     results = {'runtime': round(runtime,3), 'damage': damage, 'kphs':kphs, 'traj':traj,
                'deviation':deviation, "interventions":frames_adjusted, "episode_steps":episode_steps,
-               "reached_cutoff": reached_cutoff, "outside_track": outside_track
+               "reached_cutoff": reached_cutoff, "outside_track": outside_track, "inputs": steering_inputs
                }
     return results
 
@@ -788,7 +788,7 @@ def steering_PID(curr_steering,  steer_setpoint, dt):
     deriv = (error - steer_prev_error) / dt
     steer_integral = steer_integral + error * dt
     w = kp * error + ki * steer_integral + kd * deriv
-    print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{steer_prev_error=:.3f}  \t{w=:.3f}")
+    # print(f"steering_PID({curr_steering=:.3f}  \t{steer_setpoint=:.3f}  \t{dt=:.3f})  \t{steer_prev_error=:.3f}  \t{w=:.3f}")
     steer_prev_error = error
     return w
 
@@ -837,7 +837,7 @@ def has_car_left_track(vehicle):
     dist = min(distance_from_centerline)
     i = np.where(distance_from_centerline == dist)[0][0]
     leftrightcenter = get_position_relative_to_centerline(vehicle.state['front'], dist, i, centerdist=0.25)
-    print(f"{leftrightcenter=}  \tdist from ctrline={dist:.3f}")
+    # print(f"{leftrightcenter=}  \tdist from ctrline={dist:.3f}")
     segment_shape, theta_deg = get_current_segment_shape(vehicle_pos)
     return dist > 4.0, dist, leftrightcenter, segment_shape, theta_deg
 
@@ -935,7 +935,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    topo_id = "Rturn"
+    topo_id = "winding"
     transf_id = "fisheye"
     runs = 10
     default_scenario, road_id, seg = get_topo(topo_id)
@@ -943,16 +943,22 @@ def main():
 
     vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, transf=transf, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
                                           beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE2', port=64556)
-    distances, deviations, all_episode_steps, interventions = [], [], [], []
+    distances, deviations, all_episode_steps, interventions, all_inputs = [], [], [], [], []
     trajectories = []
     for i in range(runs):
         results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, transf=transf, vehicle_model='hopper', run_number=i, seg=seg)
+        print(f"ACTIONS:\n\t{min(results['inputs'])=}"
+              f"\n\t{max(results['inputs'])=}"
+              f"\n\t{np.mean(results['inputs'])=}"
+              f"\n\t{np.median(results['inputs'])=}"
+              f"\n\t{np.std(results['inputs'])=}")
         results['distance'] = get_distance_traveled(results['traj'])
         # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
         print(f"\nEVALUATOR + BASE MODEL + NEW CAMERA + INV TRANSF, RUN {i}:"
               f"\n\tdistance={results['distance']:.3f}"
               f"\n\tavg dist from center={results['deviation']['mean']:.3f}"
               f"\n\tintervention rate:{(results['interventions'] / results['episode_steps']):.3f}")
+        all_inputs.extend(results['inputs'])
         distances.append(results['distance'])
         deviations.append(results['deviation']['mean'])
         interventions.append(results['interventions'])
@@ -966,7 +972,11 @@ def main():
           f"\n\t{distances=}"
           f"\n\t{deviations=}"
           f"\n\t{interventions=}"
-          f"\n\t{all_episode_steps=}")
+          f"\n\t{all_episode_steps=}"
+          f"\n\t{min(all_inputs)=:.3f}"
+          f"\n\t{max(all_inputs)=:.3f}"
+          f"\n\t{np.mean(all_inputs)=:.3f}"
+          f"\n\t{np.std(all_inputs)=:.3f}")
     id = "basemodel+invtransf+0.05evalcorr" # "evalalone" #
     # try:
     plot_deviation(trajectories, "DAVE2V3", ".", savefile=f"{topo_id}-{transf_id}-{id}")

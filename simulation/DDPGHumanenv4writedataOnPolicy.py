@@ -56,7 +56,7 @@ class CarEnv(gym.Env):
         self.f = None
         self.ep_dir = None
         self.seg = seg
-        self.test_model = test_model
+        self.test_model = True
         self.action_space = spaces.Box(low=-2, high=2, shape=(1, 1), dtype=np.float32)
         self.transform = T.Compose([T.ToTensor()])
         self.episode_steps, self.frames_adjusted = 0, 0
@@ -191,18 +191,19 @@ class CarEnv(gym.Env):
             base_model_inf = self.base_model(features).item()
             self.base_model_inf.append(base_model_inf)
 
-            if abs(action.item()) < self.test_eps:
-                steer = float(base_model_inf)
-                blackedout = np.zeros(image.shape)  # BLACK
-                cv2.imshow("action image", blackedout)
-                cv2.waitKey(1)
-            else:
-                steer = float(base_model_inf + action.item())
-                self.frames_adjusted += 1
-                blackedout = np.ones(image.shape)
-                blackedout[:, :, :2] = blackedout[:, :, :2] * 0  # RED
-                cv2.imshow("action image", blackedout)
-                cv2.waitKey(1)
+            # if abs(action.item()) < self.test_eps:
+            #     steer = float(base_model_inf)
+            #     blackedout = np.zeros(image.shape)  # BLACK
+            #     cv2.imshow("action image", blackedout)
+            #     cv2.waitKey(1)
+            # else:
+            steer = float(base_model_inf + action.item())
+            self.frames_adjusted += 1
+            blackedout = np.ones(image.shape)
+            blackedout[:, :, :2] = blackedout[:, :, :2] * 0  # RED
+            cv2.imshow("action image", blackedout)
+            cv2.waitKey(1)
+
             # print(f"DDPG action={action.item():.3f}, base_model={base_model_inf:.3f}, steer={steer:.3f}")
             if abs(steer) > 0.15:
                 self.setpoint = 35
@@ -1076,7 +1077,10 @@ class CarEnv(gym.Env):
         elif self.topo == "straight":
             plt.xlim([25, 200])
             plt.ylim([-300, -265])
-        plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}', fontdict={'fontsize': 8})
+        details = deflation_pattern.split("/")[-1]
+        if "avg" in details:
+            details = details.replace("avg", "\navg")
+        plt.title(f'Trajectories with {model}\n{details}', fontdict={'fontsize': 8})
         plt.legend(fontsize=8)
         plt.draw()
         plt.savefig(save_path)

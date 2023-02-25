@@ -53,30 +53,41 @@ sys.path.append(f'{args.path2src}/GitHub/DPT/')
 
 def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn", transf="fisheye",
                 beamnginstance="BeamNG.research", port=64156, eval_eps=0.05):
+    policytype = "MlpPolicy"
+    # if label == "winding":
+    noise_sigma = 0.558 # 0.25 #
+    # else:
+    #     noise_sigma = 0.000025
+    maxepisodes = 200
+
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"F:/RRL-results/RLtrain-onpolicyeval-{label}-{transf}-max200-{eval_eps}eval-{timestr}-{randstr}"
+    newdir = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicyall-{label}-{transf}-max{maxepisodes}-{eval_eps}eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
-        shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedata.py", newdir)
-    newdir_eval = f"F:/RRL-results/RLtrain-onpolicyeval-{label}-{transf}-max200-{eval_eps}eval-eval-{timestr}-{randstr}"
+        shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedataOnPolicy.py", newdir)
+    newdir_eval = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicyall-{label}-{transf}-max200-{eval_eps}eval-EVAL-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir_eval)
 
-    from DDPGHumanenv4writedata import CarEnv
-    policytype = "MlpPolicy"
-    noise_sigma = 0.000025
+    from DDPGHumanenv4writedataOnPolicy import CarEnv
+
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
     env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance=beamnginstance, port=port, scenario=scenario, road_id=road_id, reverse=False,
-                 base_model=model_filename, test_model=False, seg=seg, transf=transf, topo=label, eval_eps=eval_eps)
+                 base_model=model_filename, test_model=True, seg=seg, transf=transf, topo=label, eval_eps=eval_eps)
 
     eval_env = CarEnv(image_shape=(3, 135, 240), obs_shape=obs_shape, model=f"DDPG{policytype}", filepathroot=newdir_eval, beamngpath='C:/Users/Meriel/Documents',
                  beamnginstance='BeamNG.researchINSTANCE4', port=64956, scenario=scenario, road_id=road_id, reverse=False,
                  base_model=model_filename, test_model=True, seg=seg, transf=transf, topo=label, eval_eps=eval_eps)
-
+    from stable_baselines3.common.monitor import Monitor
+    env = Monitor(env, newdir)
+    eval_env = Monitor(eval_env, newdir_eval)
+    # from stable_baselines3.common.vec_env import VecFrameStack, SubprocVecEnv, VecNormalize, DummyVecEnv, VecEnv
+    # env = DummyVecEnv([env])
+    # env = VecNormalize(env)
     start_time = time.time()
     from stable_baselines3 import DDPG
     from stable_baselines3.common.noise import NormalActionNoise
@@ -85,7 +96,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=noise_sigma * np.ones(n_actions))
     model = DDPG(
         policytype,
-        env,
+        eval_env,
         action_noise=action_noise,
         learning_rate=0.001,
         verbose=1,
@@ -97,21 +108,32 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
         tensorboard_log=f"{newdir}/tb_logs_DDPG/",
     )
     # Create an evaluation callback with the same env, called every 10000 iterations
-    from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnMaxEpisodes, EveryNTimesteps
-    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=500, verbose=1)
+    from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnMaxEpisodes, EveryNTimesteps, CheckpointCallback
+    from MyCallbacks import SaveOnBestTrainingRewardCallback
+
+    # setup callbacks
     callbacks = []
+    checkpoint_callback = CheckpointCallback(
+        save_freq=100000,
+        save_path="./logs/",
+        name_prefix="checkpoint",
+        save_replay_buffer=True,
+        save_vecnormalize=True,
+    )
+    # callback_save_on_best = SaveOnBestTrainingRewardCallback(check_freq=5, log_dir=newdir, verbose=1)
+    callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=maxepisodes, verbose=1)
     eval_callback = EvalCallback(
-        eval_env,
-        n_eval_episodes=5,
-        best_model_save_path=f"{newdir}",
-        log_path=f"{newdir}",
-        eval_freq=10000,
+        env,
+        n_eval_episodes=10,
+        # callback_on_new_best=checkpoint_callback,
+        best_model_save_path=newdir,
+        log_path=newdir_eval,
+        eval_freq=1000,
         verbose=1
     )
-    # everyN_callback = EveryNTimesteps(n_steps=50, callback=callback_max_episodes)
-    # callbacks.append(everyN_callback)
     callbacks.append(eval_callback)
     callbacks.append(callback_max_episodes)
+    # callbacks.append(callback_save_on_best)
     kwargs = {}
     kwargs["callback"] = callbacks
     model.learn(total_timesteps=5e10, tb_log_name="DDPG-sb3_car_run_" + str(time.time()), **kwargs)
@@ -120,13 +142,14 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True
     logging.getLogger('PIL').setLevel(logging.WARNING)
-    args = parse_args()
 
     if args.transformation == "resinc":
         obs_shape = (3, 270, 480)
     elif args.transformation == "resdec":
         obs_shape = (3, 54, 96)
     elif args.transformation == "fisheye" or args.transformation == "depth":
+        obs_shape = (3, 135, 240)
+    elif args.transformation == "None":
         obs_shape = (3, 135, 240)
 
     if args.scenario == "Rturn":
