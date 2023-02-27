@@ -17,9 +17,34 @@ from torchvision.utils import save_image
 import pandas as pd
 import pickle
 
+def load_road_def(topo):
+    if topo == "winding":
+        filename = "road-def-winding-west_coast_usa-10988"
+    elif topo == "straight":
+        filename = "road-def-straight-automation_test_track-8185"
+    elif topo == "Rturn":
+        filename = "road-def-Rturn-hirochi_raceway-9039"
+    elif topo == "Lturn":
+        filename = "road-def-Lturn-west_coast_usa-12930"
+    with open(f"posefiles/{filename}.txt", "r") as f:
+        centerline, roadleft, roadright = [], [], []
+        currentline = ""
+        lines = f.readlines()
+        for l in lines:
+            if "CENTER" in l:
+                currentline = centerline
+            elif "LEFT" in l:
+                currentline = roadleft
+            elif "RIGHT" in l:
+                currentline = roadright
+            else:
+                l = l.strip().split(",")
+                l = [float(p) for p in l]
+                currentline.append(l)
+        return centerline, roadleft, roadright
 
-
-def plot_deviation(model, topo, trajectories, centerline, roadleft, roadright, deflation_pattern, save_path=".", start_viz=False):
+def plot_deviation(topo, deflation_pattern, trajectories, save_path=".", alpha=1.0):
+    centerline, roadleft, roadright = load_road_def(topo)
     plt.figure(20, dpi=180)
     plt.clf()
     x, y = [], []
@@ -42,7 +67,7 @@ def plot_deviation(model, topo, trajectories, centerline, roadleft, roadright, d
         for point in t:
             x.append(point[0])
             y.append(point[1])
-        plt.plot(x, y)  # , label="Run {}".format(i))
+        plt.plot(x, y, alpha=alpha)  # , label="Run {}".format(i))
     if topo == "winding":
         plt.xlim([700, 900])
         plt.ylim([-200, 125])
@@ -52,10 +77,15 @@ def plot_deviation(model, topo, trajectories, centerline, roadleft, roadright, d
     elif topo == "straight":
         plt.xlim([25, 200])
         plt.ylim([-300, -265])
-    plt.title(f'Trajectories with {model}\n{deflation_pattern.split("/")[-1]}', fontdict={'fontsize': 8})
+    details = deflation_pattern.split("/")[-1]
+    if "avg" in details:
+        details = details.replace("avg", "\navg")
+    plt.title(f'Trajectories {details}', fontdict={'fontsize': 8})
     plt.legend(fontsize=8)
     plt.draw()
-    plt.savefig(save_path)
+    imgpath = f"{save_path}/{deflation_pattern.split('/')[-1]}-alpha={alpha}.jpg"
+    plt.savefig(imgpath)
+    print(f"Saving to {imgpath}")
     plt.clf()
 
 def plot_errors(errors, filename="images/errors.png"):
@@ -194,6 +224,25 @@ def get_distance_traveled(traj):
                 traj[i][2] - traj[i + 1][2], 2))
     return dist
 
+def get_topo(dir):
+    if "winding" in dir.lower():
+        return "winding"
+    elif "straight" in dir.lower():
+        return "straight"
+    elif "rturn" in dir.lower():
+        return "Rturn"
+    elif "lturn" in dir.lower():
+        return "Lturn"
+
+
+def consume_evaluations(trainResultsDir):
+    from numpy import load
+    data = load(f'{trainResultsDir}/evaluations.npz')
+    lst = data.files
+    for item in lst:
+        print(item)
+        print(data[item])
+
 def unpickle_results(filename):
     with open(filename, "rb") as f:
         results = pickle.load(f)
@@ -202,26 +251,20 @@ def unpickle_results(filename):
 def main():
     global base_filename, default_scenario, default_spawnpoint, setpoint, integral
     global prev_error, centerline, centerline_interpolated, unperturbed_traj
-    start = time.time()
-    evalResultsDir = "F:/RRL-results/RLtrain-MlpPolicy-0.558-onpolicyall-winding-fisheye-max200-0.05eval-2_24-20_22-JALLIT"
-    trainResultsDir = "F:/RRL-results/RLtrain-onpolicyeval-winding-fisheye-max200-0.05eval-eval-2_24-20_22-JALLIT"
+    trainResultsDir = "F:/RRL-results/RLtrain-onpolicyall-winding-fisheye-max200-0.05eval-2_24-14_10-KUZMT5"
     fileExt = r".pickle"
     dirs = [_ for _ in os.listdir(trainResultsDir) if _.endswith(fileExt)]
-    from numpy import load
+    topo = get_topo(trainResultsDir)
+    # consume_evaluations(evalResultsDir)
+    dists_from_center, dists_travelled, trajectories, rewards = [], [], [], []
+    episode_steps = adjusted_frames = 0
 
-    data = load(f'{trainResultsDir}/evaluations.npz')
-    lst = data.files
-    for item in lst:
-        print(item)
-        print(data[item])
-    # exit(0)
-    dists_from_center = []
-    dists_travelled = []
     for d in dirs:
         results = unpickle_results("/".join([trainResultsDir, d]))
         print(d)
         print(results.keys())
         dist = get_distance_traveled(results['trajectory'])
+        trajectories.append(results['trajectory'])
         print(f"\ttotal distance travelled: {dist:.1f}"
               f"\n\ttotal episode reward: {sum(results['rewards']):.1f}"
               f"\n\tavg dist from ctrline: {sum(results['dist_from_centerline']) / len(results['dist_from_centerline']):.3f}"
@@ -229,12 +272,18 @@ def main():
               f"\n\ttotal steps: {results['total_steps']}"
               f"\n\trew max/min/avg/stdev: {max(results['rewards']):.3f} / {min(results['rewards']):.3f} / {sum(results['rewards']) / len(results['rewards']):.3f} / {np.std(results['rewards']):.3f}"
               f"\n")
+        rewards.append(sum(results['rewards']))
         dists_travelled.append(dist)
         dists_from_center.append(sum(results['dist_from_centerline']) / len(results['dist_from_centerline']))
-    print(f"Avg dist travelled: {sum(dists_travelled) / len(dists_travelled)}"
-          f"\nAvg dist from centerline: {sum(dists_from_center) / len(dists_from_center)}")
-    print(f"Finished in {time.time() - start} seconds")
-
+        episode_steps += results['frames_adjusted_count']
+        adjusted_frames += results['total_steps']
+    print(f"Avg dist travelled: {sum(dists_travelled) / len(dists_travelled):.3f}"
+          f"\nAvg dist from centerline: {sum(dists_from_center) / len(dists_from_center):.3f}"
+          f"\nAvg. frames adjusted: {(adjusted_frames / episode_steps):.3f}"
+          f"\nAvg. steps per episode: {(episode_steps / len(dists_travelled)):.3f}"
+          f"\nAvg reward: {(sum(rewards) / len(rewards)):.3f}")
+    plot_deviation(topo, trainResultsDir.split("/")[-1], trajectories, save_path=".")
+    plot_deviation(topo, trainResultsDir.split("/")[-1], trajectories, save_path=".", alpha=0.1)
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True
