@@ -1,5 +1,4 @@
 import tree
-import pickle
 import os.path
 import cv2
 import random
@@ -8,11 +7,11 @@ from matplotlib import pyplot as plt
 import logging
 import scipy.misc
 import copy
+import tensorflow as tf
 import torch
 import statistics, math
 from scipy.spatial.transform import Rotation as R
 from scipy import interpolate
-from pathlib import Path
 import csv
 from ast import literal_eval
 import PIL
@@ -40,7 +39,7 @@ centerline = []
 centerline_interpolated = []
 roadleft = []
 roadright = []
-#training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
+training_file = "" #"'metas/training_runs_{}-{}1-deletelater.txt'.format(default_scenario, road_id)
 
 
 # positive angle is to the right / clockwise
@@ -223,9 +222,6 @@ def spawn_point(default_scenario, road_id, reverse=False, seg=1):
         if road_id == 'west':
             # western industrial area -- didnt work with AI Driver
             return {'pos': (237.131, -379.919, 34.5561), 'rot': None, 'rot_quat': (-0.035, -0.0181, 0.949, 0.314)}
-        elif road_id == '7982':
-            return {'pos': (160.905, -91.9654, 42.8511), 'rot': None,
-                    'rot_quat': (-0.0036226876545697, 0.0065293218940496, 0.92344760894775, -0.38365218043327)}
         # open industrial area -- didnt work with AI Driver
         # drift course (dirt and paved)
         elif road_id == 'driftcourse':
@@ -360,13 +356,9 @@ def plot_deviation(trajectories, model, deflation_pattern, savefile="trajectorie
     for point in centerline:
         x.append(point[0])
         y.append(point[1])
-    plt.plot(x, y, "k-")
-    x, y = [], []
     for point in roadleft:
         x.append(point[0])
         y.append(point[1])
-    plt.plot(x, y, "k-")
-    x, y = [], []
     for point in roadright:
         x.append(point[0])
         y.append(point[1])
@@ -376,21 +368,16 @@ def plot_deviation(trajectories, model, deflation_pattern, savefile="trajectorie
         for point in t:
             x.append(point[0])
             y.append(point[1])
-        plt.plot(x, y, label="Run {}".format(i), alpha=0.75)
-    # x.sort()
-    # y.sort()
-    # min_x, max_x = x[0], x[-1]
-    # min_y, max_y = y[0], y[-1]
-    # plt.xlim(min_x, max_x)
-    # plt.ylim(min_y, max_y)
+        plt.plot(x, y, label="Run {}".format(i))
+    if "winding" in savefile:
+        plt.xlim([700, 900])
+        plt.ylim([-150, 50])
     plt.title(f'Trajectories with {model} \n{savefile}')
-    # plt.legend()
-    plt.legend(loc=2, prop={'size': 6})
+    plt.legend()
     plt.draw()
-    print(f"Saving image to {deflation_pattern}/{savefile}.jpg")
     plt.savefig(f"{deflation_pattern}/{savefile}.jpg")
-    # plt.show()
-    # plt.pause(0.1)
+    plt.show()
+    plt.pause(0.1)
 
 def lineseg_dists(p, a, b):
     """Cartesian distance from point to line segment
@@ -606,11 +593,11 @@ def create_ai_line_from_road_with_interpolation(spawn, bng, road_id):
 
 # track is approximately 12.50m wide
 # car is approximately 1.85m wide
-def has_car_left_track(vehicle_pos, max_dist=5.0):
+def has_car_left_track(vehicle_pos, vehicle_bbox, bng):
     global centerline_interpolated
     distance_from_centerline = dist_from_line(centerline_interpolated, vehicle_pos)
     dist = min(distance_from_centerline)
-    return dist > max_dist, dist
+    return dist > 5.0, dist
 
 def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
@@ -627,10 +614,6 @@ def setup_beamng(default_scenario, road_id, reverse=False, seg=1, img_dims=(240,
     spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
     print(default_scenario, road_id, seg, spawn)
     scenario.add_vehicle(vehicle, pos=spawn['pos'], rot=None, rot_quat=spawn['rot_quat']) #, partConfig=parts_config)
-    try:
-        add_barriers(scenario, default_scenario)
-    except FileNotFoundError as e:
-        print(e)
     print(road_id)
     scenario.make(beamng)
     bng = beamng.open(launch=True)
@@ -648,7 +631,6 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'), seg=None):
     global base_filename
     global integral, prev_error, setpoint
-    spawn = spawn_point(default_scenario, road_id, reverse=reverse, seg=seg)
     if default_scenario == "hirochi_raceway" and road_id == "9039" and seg == 0:
         cutoff_point = [368.466, -206.154, 43.8237]
     elif default_scenario == "automation_test_track" and road_id == "8185":
@@ -661,7 +643,7 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
         # cutoff_point = [843.5073852539062, 6.2438249588012695, 147.01889038085938] # middle
         cutoff_point = [843.6112670898438, 6.58771276473999, 147.01829528808594] # late
     else:
-        cutoff_point = spawn['pos']
+        cutoff_point = [601.547, 53.4482, 43.29]
     integral = 0.0
     prev_error = 0.0
     bng.restart_scenario()
@@ -758,11 +740,11 @@ def run_scenario(vehicle, bng, scenario, model, default_scenario, road_id, rever
 
         # dist_to_cutoff = distance2D(vehicle.state["pos"], cutoff_point)
         # print(f"{dist_to_cutoff=:3f}")
-        if distance2D(vehicle.state["pos"], cutoff_point) < 12 and len(traj) > 30:
+        if distance2D(vehicle.state["pos"], cutoff_point) < 12:
             print("Reached cutoff point, exiting...")
             break
 
-        outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], max_dist=6.0)
+        outside_track, distance_from_center = has_car_left_track(vehicle.state['pos'], vehicle.get_bbox(), bng)
         if outside_track:
             print("Left track, exiting...")
             break
@@ -791,8 +773,8 @@ def turn_X_degrees(rot_quat, degrees=90):
     r = R.from_euler('xyz', r, degrees=True)
     return tuple(r.as_quat())
 
-def add_barriers(scenario, default_scenario):
-    with open(f'posefiles/{default_scenario}_barrier_locations.txt', 'r') as f:
+def add_barriers(scenario):
+    with open('posefiles/hirochi_barrier_locations.txt', 'r') as f:
         lines = f.readlines()
         for i, line in enumerate(lines):
             line = line.split(' ')
@@ -829,17 +811,11 @@ def get_topo(topo_id):
         default_scenario="hirochi_raceway"; road_id="9039"; seg=0
     elif "Lturn" in topo_id:
         default_scenario = "west_coast_usa"; road_id = "12930"; seg = None
-    elif "track" in topo_id:
-        default_scenario = "industrial"; road_id = "7982"; seg = None
     return default_scenario, road_id, seg
 
 def get_transf(transf_id):
-    if transf_id == "regular" or transf_id is None:
-        img_dims = (240, 135); fov = 51; transf = "None"
-    elif transf_id == "medium":
-        img_dims = (192, 108); fov = 51; transf = "None"
-    elif transf_id == "small":
-        img_dims = (144, 81); fov = 51; transf = "None"
+    if transf_id is None:
+        img_dims = (240,135); fov = 51; transf = "None"
     elif "fisheye" in transf_id:
         img_dims = (240,135); fov=75; transf = "fisheye"
     elif "resdec" in transf_id:
@@ -850,77 +826,16 @@ def get_transf(transf_id):
         img_dims = (240, 135); fov = 51; transf = "depth"
     return img_dims, fov, transf
 
-
 def main():
     global base_filename
-    # model_name = "F:/DAVE2v3-81x144-99Ksamples-500epoch-4930198-3_31-22_58-82FATC/model-DAVE2v3-randomblurnoise-81x144-lr1e4-500epoch-64batch-lossMSE-99Ksamples.pt"
-    # model_name = "F:/DAVE2v3-81x144-99Ksamples-500epoch-4930194-3_31-22_18-HYPI4L/model-DAVE2v3-randomblurnoise-81x144-lr1e4-500epoch-64batch-lossMSE-99Ksamples.pt"
-    # model_name = "F:/DAVE2v3-135x240-99Ksamples-500epoch-4929959-3_29-19_14-2QPIVB/model-DAVE2v3-randomblurnoise-135x240-lr1e4-500epoch-64batch-lossMSE-99Ksamples.pt"
-    # model_name = "F:/DAVE2v3-135x240-82samples-500epoch-4930307-4_2-14_24-CCYHQK/model-DAVE2v3-randomblurnoise-135x240-lr1e4-500epoch-64batch-lossMSE-82Ksamples.pt"
-    # model_name = "F:/DAVE2v3-81x144-82samples-500epoch-4930306-4_2-14_24-RBALAQ/model-DAVE2v3-randomblurnoise-81x144-lr1e4-500epoch-64batch-lossMSE-82Ksamples.pt"
-    # model_name = "F:/DAVE2v3-81x144-99samples-1000epoch-5108267-4_10-12_26-DGB5XQ/model-DAVE2v3-randomblurnoise-81x144-lr1e4-1000epoch-64batch-lossMSE-99Ksamples.pt"
-    # model_name = "F:/DAVE2v3-108x192-82samples-1000epoch-5116933-4_10-17_9-2RIWIM/model-DAVE2v3-randomblurnoise-108x192-lr1e4-1000epoch-64batch-lossMSE-82Ksamples.pt"
-    model_name = "F:/DAVE2v3-108x192-82samples-5000epoch-5116933-4_12-23_11-2D8U63/model-DAVE2v3-randomblurnoise-108x192-lr1e4-5000epoch-64batch-lossMSE-82Ksamples-best152.pt"
-    model_name = "F:/DAVE2v3-135x240-82samples-1000epoch-5108644-4_12-13_19-N12SOX/model-DAVE2v3-randomblurnoise-135x240-lr1e4-1000epoch-64batch-lossMSE-82Ksamples.pt"
+    model_name = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt" # orig model
+    # model_name = "../models/retrained-lighterblur-noflip-fixednoise/model-fixnoise-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-best.pt"
+    # model_name = "C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/models/weights/fixed-base-model/model-DAVE2v3-135x240-lr1e4-100epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur.pt"
+    from resnet import ResNet50, ResNet101, ResNet152
+    # model_name = "../models/weights/model-ResNet-randomblurnoise-135x240-lr1e4-500epoch-64batch-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-noiseflipblur-epoch121.pt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
-
-    topo_id = "track"
-    transf_id = "regular"
-    default_scenario, road_id, seg = get_topo(topo_id)
-    img_dims, fov, transf = get_transf(transf_id)
-
-    vehicle, bng, scenario = setup_beamng(default_scenario=default_scenario, road_id=road_id, seg=seg, img_dims=img_dims, fov=fov, vehicle_model='hopper',
-                                          beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE3', port=64156)
-    distances, deviations, trajectories = [], [], []
-    runs = 10
-
-    filepathroot = f"{'/'.join(model_name.split('/')[:-1])}/{default_scenario}-{road_id}-{topo_id}topo-{runs}runs/"
-    print(f"{filepathroot=}")
-    #os.mkdir(filepathroot)
-    Path(filepathroot).mkdir(exist_ok=True, parents=True)
-
-    for i in range(runs):
-        results = run_scenario(vehicle, bng, scenario, model, default_scenario=default_scenario, road_id=road_id, seg=seg)
-        results['distance'] = get_distance_traveled(results['traj'])
-        # plot_trajectory(results['traj'], f"{default_scenario}-{model._get_name()}-{road_id}-runtime{results['runtime']:.2f}-dist{results['distance']:.2f}")
-        print(f"\nBASE MODEL USING IMG DIMS {img_dims} RUN {i}:"
-              f"\n\tdistance={results['distance']:1f}"
-              f"\n\tavg dist from center={results['deviation']['mean']:3f}")
-        distances.append(results['distance'])
-        deviations.append(results['deviation']['mean'])
-        trajectories.append(results["traj"])
-    summary = {
-        "trajectories": trajectories,
-        "dists_from_centerline": deviations,
-        "dists_travelled": distances,
-        "img_dims": img_dims,
-        "centerline_interpolated": centerline_interpolated,
-        "roadleft": roadleft,
-        "roadright": roadright,
-        "default_scenario": default_scenario,
-        "road_id": road_id,
-        "topo_id": topo_id,
-        "transf_id": transf_id
-        # "obs_shape": self.obs_shape,
-        # "action_space": self.action_space,
-        # "wall_clock_time": time.time() - self.start_time,
-        # "sim_time": self.runtime
-    }
-    picklefile = open(f"{filepathroot}/summary-{model_name.split('/')[-1]}.pickle", 'wb')
-    pickle.dump(summary, picklefile)
-    picklefile.close()
-    print(f"OUT OF {runs} RUNS:\n\tAverage distance: {(sum(distances)/len(distances)):1f}"
-          f"\n\tAverage deviation: {(sum(deviations) / len(deviations)):3f}"
-          f"\n\t{distances=}"
-          f"\n\t{deviations:}")
-    id = "basemodelalone"
-    try:
-        plot_deviation(trajectories, "DAVE2V3 ", filepathroot, savefile=f"{topo_id}-{transf_id}-{id}")
-    except:
-        plot_deviation(trajectories, "DAVE2V3", filepathroot, savefile=f"{topo_id}-{transf_id}-{id}")
-    bng.close()
-
+    print(model)
 
 if __name__ == '__main__':
     logging.getLogger('matplotlib.font_manager').disabled = True

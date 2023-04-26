@@ -50,22 +50,17 @@ def main():
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"RLtrain-DDPGonpolicy-halfres-everystep-singleinput-distrew-{timestr}-{randstr}"
+    newdir = f"RERUNOLD-RLtrain-max200epi-DDPGhuman-0.05evaleps-normimg-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
-        shutil.copy(f"{os.getcwd()}/DDPGonpolicy2.py", newdir)
-    PATH = f"{newdir}/distrew"
+        shutil.copy(f"{os.getcwd()}/DDPGHumanenv4.py", newdir)
+    PATH = f"{newdir}/evalexpert"
 
-    from DDPGonpolicy2 import CarEnv
+    from DDPGHumanenv4VJZFXE import CarEnv
     model_filename = "../models/weights/dave2-weights/model-DAVE2v3-lr1e4-100epoch-batch64-lossMSE-82Ksamples-INDUSTRIALandHIROCHIandUTAH-135x240-noiseflipblur.pt"
-    env = CarEnv(image_shape=(3, 135, 240), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents', beamnginstance="BeamNG.researchINSTANCE3",
-                 # port=64156, scenario="west_coast_usa", road_id="12146", reverse=False, # outskirts with bus stop
-                 # port=64356, scenario="automation_test_track", road_id="8185", reverse=False,
-                 # port=64356, scenario="west_coast_usa", road_id="10784", reverse=False,
-                 port=64556, scenario="hirochi_raceway", road_id="9039", reverse=False,
-                 # port=64156, scenario="west_coast_usa", road_id="10673", reverse=False,
-                 # port=64156, scenario="west_coast_usa", road_id="12930", reverse=False,
+    env = CarEnv(image_shape=(3, 135, 240), obs_shape=(3, 135, 240), model="DDPGMLPSingle", filepathroot=PATH, beamngpath='C:/Users/Meriel/Documents',
+                 beamnginstance="BeamNG.researchINSTANCE2", port=64356, scenario="hirochi_raceway", road_id="9039", reverse=False,
                  base_model=model_filename, test_model=False)
 
     start_time = time.time()
@@ -73,9 +68,9 @@ def main():
     from stable_baselines3.common.noise import NormalActionNoise
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0. * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.000025 * np.ones(n_actions))
     model = DDPG(
-        "CnnPolicy",
+        "MlpPolicy",
         env,
         action_noise=action_noise,
         learning_rate=0.001,
@@ -87,8 +82,6 @@ def main():
         device="cuda",
         tensorboard_log=f"./{newdir}/tb_logs_DDPG/",
     )
-    print(f"{model.policy=}")
-    exit(0)
     # Create an evaluation callback with the same env, called every 10000 iterations
     from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement, StopTrainingOnMaxEpisodes
     stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=10, min_evals=50, verbose=1)
@@ -97,7 +90,7 @@ def main():
     eval_callback = EvalCallback(
         env,
         callback_on_new_best=None,
-        #callback_after_eval=stop_train_callback,
+        callback_after_eval=callback_max_episodes,
         n_eval_episodes=5,
         best_model_save_path=f"./{newdir}",
         log_path=f"./{newdir}",

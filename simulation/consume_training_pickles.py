@@ -251,7 +251,7 @@ def unpickle_results(filename):
 def main():
     global base_filename, default_scenario, default_spawnpoint, setpoint, integral
     global prev_error, centerline, centerline_interpolated, unperturbed_traj
-    trainResultsDir = "F:/RRL-results/RLtrain-onpolicyall-winding-fisheye-max200-0.05eval-2_24-14_10-KUZMT5"
+    trainResultsDir = "F:/RRL-results/RLtrain-CnnPolicy-0.558-onpolicy-1kpunish-winding-resdec-max1000-0.05eval-EVAL-3_5-16_11-0F58HV"
     fileExt = r".pickle"
     dirs = [_ for _ in os.listdir(trainResultsDir) if _.endswith(fileExt)]
     topo = get_topo(trainResultsDir)

@@ -1,0 +1,365 @@
+C:\Users\Meriel\Documents\GitHub\deeplearning-input-rectification\venv-dqn\Scripts\python.exe C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/consume_training_pickles.py
+['summary-epi000.pickle', 'summary-epi001.pickle', 'summary-epi002.pickle', 'summary-epi003.pickle', 'summary-epi004.pickle', 'summary-epi006.pickle', 'summary-epi007.pickle', 'summary-epi008.pickle', 'summary-epi009.pickle', 'summary-epi010.pickle', 'summary-epi012.pickle', 'summary-epi013.pickle', 'summary-epi014.pickle', 'summary-epi015.pickle', 'summary-epi016.pickle', 'summary-epi018.pickle', 'summary-epi019.pickle', 'summary-epi020.pickle', 'summary-epi021.pickle', 'summary-epi022.pickle', 'summary-epi024.pickle', 'summary-epi025.pickle', 'summary-epi026.pickle', 'summary-epi027.pickle', 'summary-epi028.pickle', 'summary-epi030.pickle', 'summary-epi031.pickle', 'summary-epi032.pickle', 'summary-epi033.pickle', 'summary-epi034.pickle', 'summary-epi036.pickle', 'summary-epi037.pickle', 'summary-epi038.pickle', 'summary-epi039.pickle', 'summary-epi040.pickle', 'summary-epi042.pickle', 'summary-epi043.pickle', 'summary-epi044.pickle', 'summary-epi045.pickle', 'summary-epi046.pickle']
+summary-epi000.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.3
+	total episode reward: -4599.4
+	avg dist from ctrline: 1.223
+	percent frames adjusted: 0.389
+	total steps: 54
+	rew max/min/avg/stdev: 15.949 / -5000.000 / -85.175 / 675.115
+
+summary-epi001.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.9
+	total episode reward: -4589.8
+	avg dist from ctrline: 1.221
+	percent frames adjusted: 0.436
+	total steps: 55
+	rew max/min/avg/stdev: 15.587 / -5000.000 / -83.450 / 669.069
+
+summary-epi002.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 29.9
+	total episode reward: -4582.4
+	avg dist from ctrline: 1.250
+	percent frames adjusted: 0.368
+	total steps: 57
+	rew max/min/avg/stdev: 15.656 / -5000.000 / -80.393 / 657.422
+
+summary-epi003.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 29.1
+	total episode reward: -4597.4
+	avg dist from ctrline: 1.264
+	percent frames adjusted: 0.411
+	total steps: 56
+	rew max/min/avg/stdev: 15.702 / -5000.000 / -82.097 / 663.142
+
+summary-epi004.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.1
+	total episode reward: -4612.5
+	avg dist from ctrline: 1.247
+	percent frames adjusted: 0.370
+	total steps: 54
+	rew max/min/avg/stdev: 15.471 / -5000.000 / -85.416 / 675.082
+
+summary-epi006.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 30.9
+	total episode reward: -4582.4
+	avg dist from ctrline: 1.275
+	percent frames adjusted: 0.339
+	total steps: 59
+	rew max/min/avg/stdev: 15.658 / -5000.000 / -77.667 / 646.346
+
+summary-epi007.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 38.4
+	total episode reward: -4509.3
+	avg dist from ctrline: 1.361
+	percent frames adjusted: 0.274
+	total steps: 73
+	rew max/min/avg/stdev: 15.476 / -5000.000 / -61.771 / 581.990
+
+summary-epi008.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 42.2
+	total episode reward: -4454.0
+	avg dist from ctrline: 1.372
+	percent frames adjusted: 0.263
+	total steps: 80
+	rew max/min/avg/stdev: 15.847 / -5000.000 / -55.675 / 556.295
+
+summary-epi009.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 100.4
+	total episode reward: -3951.7
+	avg dist from ctrline: 1.795
+	percent frames adjusted: 0.122
+	total steps: 188
+	rew max/min/avg/stdev: 15.782 / -5000.000 / -21.020 / 364.123
+
+summary-epi010.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 101.8
+	total episode reward: 1403.4
+	avg dist from ctrline: 1.212
+	percent frames adjusted: 0.105
+	total steps: 191
+	rew max/min/avg/stdev: 15.967 / 2.587 / 7.348 / 3.955
+
+summary-epi012.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 101.6
+	total episode reward: 1235.8
+	avg dist from ctrline: 1.476
+	percent frames adjusted: 0.132
+	total steps: 190
+	rew max/min/avg/stdev: 15.834 / 1.672 / 6.504 / 4.487
+
+summary-epi013.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.7
+	total episode reward: -4607.2
+	avg dist from ctrline: 1.255
+	percent frames adjusted: 0.345
+	total steps: 55
+	rew max/min/avg/stdev: 15.528 / -5000.000 / -83.766 / 669.027
+
+summary-epi014.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.3
+	total episode reward: -4612.1
+	avg dist from ctrline: 1.231
+	percent frames adjusted: 0.315
+	total steps: 54
+	rew max/min/avg/stdev: 15.574 / -5000.000 / -85.410 / 675.083
+
+summary-epi015.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.3
+	total episode reward: -4609.8
+	avg dist from ctrline: 1.222
+	percent frames adjusted: 0.278
+	total steps: 54
+	rew max/min/avg/stdev: 15.437 / -5000.000 / -85.367 / 675.089
+
+summary-epi016.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.3
+	total episode reward: -4617.5
+	avg dist from ctrline: 1.195
+	percent frames adjusted: 0.288
+	total steps: 52
+	rew max/min/avg/stdev: 15.808 / -5000.000 / -88.797 / 687.718
+
+summary-epi018.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.7
+	total episode reward: -4618.0
+	avg dist from ctrline: 1.224
+	percent frames adjusted: 0.358
+	total steps: 53
+	rew max/min/avg/stdev: 15.584 / -5000.000 / -87.132 / 681.305
+
+summary-epi019.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.8
+	total episode reward: -4608.7
+	avg dist from ctrline: 1.254
+	percent frames adjusted: 0.345
+	total steps: 55
+	rew max/min/avg/stdev: 15.958 / -5000.000 / -83.795 / 669.023
+
+summary-epi020.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.2
+	total episode reward: -4602.5
+	avg dist from ctrline: 1.228
+	percent frames adjusted: 0.333
+	total steps: 54
+	rew max/min/avg/stdev: 15.690 / -5000.000 / -85.232 / 675.108
+
+summary-epi021.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.9
+	total episode reward: -4601.0
+	avg dist from ctrline: 1.235
+	percent frames adjusted: 0.364
+	total steps: 55
+	rew max/min/avg/stdev: 15.696 / -5000.000 / -83.655 / 669.042
+
+summary-epi022.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 29.4
+	total episode reward: -4579.0
+	avg dist from ctrline: 1.231
+	percent frames adjusted: 0.375
+	total steps: 56
+	rew max/min/avg/stdev: 15.418 / -5000.000 / -81.769 / 663.186
+
+summary-epi024.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 29.4
+	total episode reward: -4587.7
+	avg dist from ctrline: 1.242
+	percent frames adjusted: 0.393
+	total steps: 56
+	rew max/min/avg/stdev: 15.797 / -5000.000 / -81.923 / 663.166
+
+summary-epi025.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.7
+	total episode reward: -4593.6
+	avg dist from ctrline: 1.233
+	percent frames adjusted: 0.382
+	total steps: 55
+	rew max/min/avg/stdev: 15.927 / -5000.000 / -83.520 / 669.060
+
+summary-epi026.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.6
+	total episode reward: -4615.5
+	avg dist from ctrline: 1.234
+	percent frames adjusted: 0.396
+	total steps: 53
+	rew max/min/avg/stdev: 15.640 / -5000.000 / -87.086 / 681.310
+
+summary-epi027.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.6
+	total episode reward: -4620.6
+	avg dist from ctrline: 1.260
+	percent frames adjusted: 0.377
+	total steps: 53
+	rew max/min/avg/stdev: 15.940 / -5000.000 / -87.182 / 681.297
+
+summary-epi028.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.5
+	total episode reward: -4625.6
+	avg dist from ctrline: 1.268
+	percent frames adjusted: 0.396
+	total steps: 53
+	rew max/min/avg/stdev: 15.606 / -5000.000 / -87.275 / 681.285
+
+summary-epi030.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.2
+	total episode reward: -4615.8
+	avg dist from ctrline: 1.211
+	percent frames adjusted: 0.404
+	total steps: 52
+	rew max/min/avg/stdev: 15.541 / -5000.000 / -88.766 / 687.722
+
+summary-epi031.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 33.2
+	total episode reward: -4543.1
+	avg dist from ctrline: 1.244
+	percent frames adjusted: 0.270
+	total steps: 63
+	rew max/min/avg/stdev: 15.769 / -5000.000 / -72.113 / 625.855
+
+summary-epi032.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 90.3
+	total episode reward: -3982.9
+	avg dist from ctrline: 1.561
+	percent frames adjusted: 0.124
+	total steps: 169
+	rew max/min/avg/stdev: 15.603 / -5000.000 / -23.567 / 383.961
+
+summary-epi033.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 84.3
+	total episode reward: -3787.7
+	avg dist from ctrline: 1.213
+	percent frames adjusted: 0.114
+	total steps: 158
+	rew max/min/avg/stdev: 15.907 / -5000.000 / -23.973 / 397.146
+
+summary-epi034.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 101.1
+	total episode reward: 803.2
+	avg dist from ctrline: 2.227
+	percent frames adjusted: 0.111
+	total steps: 189
+	rew max/min/avg/stdev: 15.946 / 1.108 / 4.250 / 4.242
+
+summary-epi036.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 26.6
+	total episode reward: -4616.2
+	avg dist from ctrline: 1.183
+	percent frames adjusted: 0.333
+	total steps: 51
+	rew max/min/avg/stdev: 15.471 / -5000.000 / -90.514 / 694.318
+
+summary-epi037.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.3
+	total episode reward: -4616.9
+	avg dist from ctrline: 1.196
+	percent frames adjusted: 0.308
+	total steps: 52
+	rew max/min/avg/stdev: 15.454 / -5000.000 / -88.787 / 687.719
+
+summary-epi038.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 27.2
+	total episode reward: -4625.6
+	avg dist from ctrline: 1.217
+	percent frames adjusted: 0.308
+	total steps: 52
+	rew max/min/avg/stdev: 15.578 / -5000.000 / -88.953 / 687.696
+
+summary-epi039.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.2
+	total episode reward: -4623.6
+	avg dist from ctrline: 1.268
+	percent frames adjusted: 0.315
+	total steps: 54
+	rew max/min/avg/stdev: 15.426 / -5000.000 / -85.621 / 675.055
+
+summary-epi040.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 28.8
+	total episode reward: -4598.4
+	avg dist from ctrline: 1.228
+	percent frames adjusted: 0.364
+	total steps: 55
+	rew max/min/avg/stdev: 15.608 / -5000.000 / -83.607 / 669.049
+
+summary-epi042.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 33.7
+	total episode reward: -4538.3
+	avg dist from ctrline: 1.259
+	percent frames adjusted: 0.312
+	total steps: 64
+	rew max/min/avg/stdev: 15.811 / -5000.000 / -70.910 / 621.020
+
+summary-epi043.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 39.5
+	total episode reward: -4487.7
+	avg dist from ctrline: 1.350
+	percent frames adjusted: 0.280
+	total steps: 75
+	rew max/min/avg/stdev: 15.544 / -5000.000 / -59.836 / 574.297
+
+summary-epi044.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 102.6
+	total episode reward: 1080.2
+	avg dist from ctrline: 1.769
+	percent frames adjusted: 0.109
+	total steps: 192
+	rew max/min/avg/stdev: 15.671 / 1.169 / 5.626 / 4.123
+
+summary-epi045.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 89.5
+	total episode reward: -4032.1
+	avg dist from ctrline: 1.665
+	percent frames adjusted: 0.113
+	total steps: 168
+	rew max/min/avg/stdev: 15.954 / -5000.000 / -24.001 / 385.076
+
+summary-epi046.pickle
+dict_keys(['episode', 'rewards', 'trajectory', 'total_steps', 'frames_adjusted_count', 'dist_from_centerline', 'image_shape', 'obs_shape', 'action_space', 'wall_clock_time', 'sim_time'])
+	total distance travelled: 103.8
+	total episode reward: 1131.3
+	avg dist from ctrline: 1.702
+	percent frames adjusted: 0.098
+	total steps: 194
+	rew max/min/avg/stdev: 15.739 / 1.002 / 5.831 / 4.079
+
+Finished in 0.11550784111022949 seconds
+
+Process finished with exit code 0

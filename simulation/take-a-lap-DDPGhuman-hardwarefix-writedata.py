@@ -53,22 +53,22 @@ sys.path.append(f'{args.path2src}/GitHub/DPT/')
 
 def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", seg=None, label="Rturn", transf="fisheye",
                 beamnginstance="BeamNG.research", port=64156, eval_eps=0.05):
-    policytype = "MlpPolicy"
+    policytype = "CnnPolicy"
     if label == "winding":
         noise_sigma = 0.558 # 0.25
     else:
         noise_sigma = 0.000025
-    maxepisodes = 500
+    maxepisodes = 1000
 
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    newdir = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicyall-{label}-{transf}-max{maxepisodes}-{eval_eps}eval-{timestr}-{randstr}"
+    newdir = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicy-1kpunish-{label}-{transf}-max{maxepisodes}-{eval_eps}eval-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
         shutil.copy(f"{__file__}", newdir)
         shutil.copy(f"C:/Users/Meriel/Documents/GitHub/deeplearning-input-rectification/simulation/DDPGHumanenv4writedataOnPolicy.py", newdir)
-    newdir_eval = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicyall-{label}-{transf}-max200-{eval_eps}eval-EVAL-{timestr}-{randstr}"
+    newdir_eval = f"F:/RRL-results/RLtrain-{policytype}-{noise_sigma}-onpolicy-1kpunish-{label}-{transf}-max{maxepisodes}-{eval_eps}eval-EVAL-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir_eval)
 
@@ -124,7 +124,7 @@ def run_RLtrain(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="90
     callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=maxepisodes, verbose=1)
     eval_callback = EvalCallback(
         eval_env,
-        n_eval_episodes=10,
+        n_eval_episodes=5,
         # callback_on_new_best=checkpoint_callback,
         best_model_save_path=newdir,
         log_path=newdir_eval,

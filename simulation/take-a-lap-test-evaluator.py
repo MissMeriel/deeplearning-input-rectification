@@ -45,7 +45,7 @@ interventions = 0
 training_file = ""
 topo_id = None
 steer_integral, steer_prev_error = 0., 0.
-
+scenario_name = ""
 
 # positive angle is to the right / clockwise
 def spawn_point(default_scenario, road_id, reverse=False, seg=1):
@@ -518,7 +518,7 @@ def get_nearby_racetrack_roads(bng, point_of_in, default_scenario):
 
 
 def road_analysis(bng, road_id):
-    global centerline, roadleft, roadright
+    global centerline, roadleft, roadright, scenario_name
     print("Performing road analysis...")
     # plot_racetrack_roads()
     print(f"Getting road {road_id}...")
@@ -537,6 +537,24 @@ def road_analysis(bng, road_id):
     else:
         roadleft = [edge['left'] for edge in edges]
         roadright = [edge['right'] for edge in edges]
+
+    # with open(f"road-def-{scenario_name}-{road_id}.txt", "w") as f:
+    #     f.write("CENTER\n")
+    #     for p in centerline:
+    #         p = str(p).replace(", ", ",")
+    #         p = p.replace("]","").replace("[","")
+    #         f.write(f"{p}\n")
+    #     f.write("LEFT\n")
+    #     for p in roadleft:
+    #         p = str(p).replace(", ", ",")
+    #         p = p.replace("]", "").replace("[", "")
+    #         f.write(f"{p}\n")
+    #     f.write("RIGHT\n")
+    #     for p in roadright:
+    #         p = str(p).replace(", ", ",")
+    #         p = p.replace("]", "").replace("[", "")
+    #         f.write(f"{p}\n")
+    # exit(0)
     return centerline
 
 def plot_trajectory(traj, title="Trajectory", label1="car traj."):
@@ -621,6 +639,8 @@ def add_qr_cubes(scenario):
 
 def setup_beamng(default_scenario, road_id, transf="None", reverse=False, seg=1, img_dims=(240,135), fov=51, vehicle_model='etk800', default_color="green", steps_per_sec=15,
                  beamnginstance='C:/Users/Meriel/Documents/BeamNG.researchINSTANCE4', port=64956):
+    global scenario_name
+    scenario_name = default_scenario
     random.seed(1703)
     setup_logging()
     beamng = BeamNGpy('localhost', port, home='C:/Users/Meriel/Documents/BeamNG.research.v1.7.0.1', user=beamnginstance)
@@ -935,7 +955,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(model_name, map_location=device).eval()
 
-    topo_id = "winding"
+    topo_id = "Lturn"
     transf_id = "fisheye"
     runs = 10
     default_scenario, road_id, seg = get_topo(topo_id)

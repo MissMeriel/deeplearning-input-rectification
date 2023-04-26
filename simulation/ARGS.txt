@@ -1,0 +1,4 @@
+ARGS TO TRAIN:
+--transformation resdec --scenario winding --beamnginstance BeamNG.researchINSTANCE3 --port 64756
+ARGS TO TEST:
+-e True --transformation resdec --scenario winding --beamnginstance BeamNG.researchINSTANCE3 --port 64756

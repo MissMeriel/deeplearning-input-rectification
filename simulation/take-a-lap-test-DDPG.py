@@ -87,7 +87,7 @@ def main(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", se
     randstr = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     localtime = time.localtime()
     timestr = "{}_{}-{}_{}".format(localtime.tm_mon, localtime.tm_mday, localtime.tm_hour, localtime.tm_min)
-    testdir = "RLtrain-MlpPolicy-0.558-onpolicyall-winding-fisheye-max200-0.05eval-2_24-20_22-JALLIT"
+    testdir = "RLtrain-CnnPolicy-0.558-onpolicy-1kpunish-winding-resdec-max1000-0.05eval-3_5-16_11-0F58HV"
     newdir = f"RLtest-{testdir}-{timestr}-{randstr}"
     if not os.path.exists(newdir):
         os.mkdir(newdir)
@@ -136,7 +136,8 @@ def main(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", se
     while not done or not crashed:
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, done, state = env.step(action)
-        crashed = state.get('collision', True)
+        # crashed = state.get('collision', True)
+        crashed = env.car_state["damage"]["damage"] > 1
         if done or crashed:
             ep_results = env.get_progress()
             results.append(ep_results)
@@ -145,17 +146,19 @@ def main(obs_shape=(3, 135, 240), scenario="hirochi_raceway", road_id="9039", se
         if episodes == 5:
             break
 
-    dists, centerline_dists = [], []
+    dists, centerline_dists, rewards = [], [], []
     ep_count, frames_adjusted = 0, 0
     for r in results:
         dists.append(r['dist_travelled'])
         centerline_dists.extend(r['dist_from_centerline'])
         ep_count += r["total_steps"]
         frames_adjusted += r["frames_adjusted_count"]
-    print(f"AVERAGE OVER {episodes} RUNS:"
-          f"\n\tdist travelled:{(sum(dists) / len(dists)):.1f}"
-          f"\n\tdist from ctrline:{(sum(centerline_dists) / len(centerline_dists)):.3f}"
-          f"\n\tintervention rate:{frames_adjusted / ep_count:.3f}")
+        rewards.append(sum(r["rewards"]))
+    print(f"AVERAGE OVER {episodes} RUNS:")
+    print(f"\tdist travelled:{(sum(dists) / len(dists)):.1f}")
+    print(f"\tdist from ctrline:{(sum(centerline_dists) / len(centerline_dists)):.3f}")
+    print(f"\tintervention rate:{frames_adjusted / ep_count:.3f}")
+    print(f"\tavg reward:{sum(rewards) / len(rewards):.3f}")
     env.close()
 
 if __name__ == '__main__':
